@@ -35,7 +35,7 @@ express-react-hey-api/
 
 - Node.js 18+
 - npm or yarn
-- OATSJS CLI: `npm install -g oatsjs`
+- OATS CLI: `npm install -g @tryloop/oats`
 
 ## Setup
 
@@ -77,7 +77,7 @@ From the frontend directory:
 
 ```bash
 cd frontend
-oatsjs start
+oats start
 ```
 
 This will:

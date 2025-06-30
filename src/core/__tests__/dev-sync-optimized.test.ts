@@ -22,6 +22,7 @@ jest.mock('../swagger-diff', () => {
 });
 
 import { DevSyncEngine } from '../dev-sync-optimized';
+import type { RuntimeConfig } from '../../types/config.types';
 
 const mockChokidar = chokidar as jest.Mocked<typeof chokidar>;
 const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
@@ -54,12 +55,13 @@ describe('DevSyncEngine', () => {
     process.removeListener('unhandledRejection', unhandledRejectionHandler);
   });
 
-  const defaultConfig = {
+  const config: RuntimeConfig = {
     services: {
       backend: {
         path: '../backend',
         startCommand: 'npm run dev',
         apiSpec: { path: 'src/swagger.json' },
+        port: 4000,
       },
       client: {
         path: '../client',
@@ -71,12 +73,15 @@ describe('DevSyncEngine', () => {
     sync: {
       debounceMs: 100,
       strategy: 'smart' as const,
+      autoLink: false,
+      runInitialGeneration: false,
     },
     resolvedPaths: {
       backend: '/test/backend',
       client: '/test/client',
     },
-  };
+    packageManager: 'npm',
+  } as RuntimeConfig;
 
   beforeEach((): void => {
     mockWatcher = new EventEmitter();
@@ -92,7 +97,7 @@ describe('DevSyncEngine', () => {
       JSON.stringify({ info: { version: '1.0.0' }, paths: {} })
     );
 
-    devSync = new DevSyncEngine(defaultConfig as any);
+    devSync = new DevSyncEngine(config);
 
     // Spy on runCommand and mock it to avoid dynamic import issues
     runCommandSpy = jest
@@ -106,16 +111,80 @@ describe('DevSyncEngine', () => {
   });
 
   describe('start', () => {
-    it('should start watching for changes', async () => {
+    it('should start file watching for static specs', async () => {
       await devSync.start();
 
       expect(mockChokidar.watch).toHaveBeenCalledWith(
         expect.any(Array),
         expect.objectContaining({
-          ignoreInitial: false,
+          ignoreInitial: true,
           persistent: true,
         })
       );
+    });
+
+    it('should start polling for runtime specs', async () => {
+      // Create config with runtime spec
+      const runtimeConfig: RuntimeConfig = {
+        ...config,
+        services: {
+          ...config.services,
+          backend: {
+            ...config.services.backend,
+            apiSpec: {
+              path: '/openapi.json', // Runtime spec path
+            },
+          },
+        },
+      };
+
+      const devSyncWithPolling = new DevSyncEngine(runtimeConfig);
+      const setIntervalSpy = jest.spyOn(global, 'setInterval');
+
+      await devSyncWithPolling.start();
+
+      // Should not use file watching for runtime specs
+      expect(mockChokidar.watch).not.toHaveBeenCalled();
+
+      // Should set up polling interval
+      expect(setIntervalSpy).toHaveBeenCalledWith(
+        expect.any(Function),
+        5000 // Default polling interval
+      );
+
+      setIntervalSpy.mockRestore();
+    });
+
+    it('should use custom polling interval when specified', async () => {
+      // Create config with runtime spec and custom interval
+      const runtimeConfig: RuntimeConfig = {
+        ...config,
+        sync: {
+          ...config.sync,
+          pollingInterval: 3000,
+        },
+        services: {
+          ...config.services,
+          backend: {
+            ...config.services.backend,
+            apiSpec: {
+              path: 'runtime:/openapi.json',
+            },
+          },
+        },
+      };
+
+      const devSyncWithPolling = new DevSyncEngine(runtimeConfig);
+      const setIntervalSpy = jest.spyOn(global, 'setInterval');
+
+      await devSyncWithPolling.start();
+
+      expect(setIntervalSpy).toHaveBeenCalledWith(
+        expect.any(Function),
+        3000 // Custom polling interval
+      );
+
+      setIntervalSpy.mockRestore();
     });
 
     it('should handle file changes with debouncing', async () => {
@@ -164,9 +233,9 @@ describe('DevSyncEngine', () => {
 
     it('should run initial generation when configured', async () => {
       const configWithInitialGen = {
-        ...defaultConfig,
+        ...config,
         sync: {
-          ...defaultConfig.sync,
+          ...config.sync,
           runInitialGeneration: true,
         },
       };
@@ -188,7 +257,7 @@ describe('DevSyncEngine', () => {
     });
 
     it('should handle file changes and trigger sync', async () => {
-      const engine = new DevSyncEngine(defaultConfig as any);
+      const engine = new DevSyncEngine(config);
       const mockWatcher = {
         on: jest.fn().mockReturnThis(),
         close: jest.fn(),
@@ -211,7 +280,7 @@ describe('DevSyncEngine', () => {
     });
 
     it('should handle errors during sync', async () => {
-      const engine = new DevSyncEngine(defaultConfig as any);
+      const engine = new DevSyncEngine(config);
       const mockWatcher = {
         on: jest.fn().mockReturnThis(),
         close: jest.fn(),
@@ -270,17 +339,17 @@ describe('DevSyncEngine', () => {
 
     it('should perform full sync with build and link', async () => {
       const configWithFullSync = {
-        ...defaultConfig,
+        ...config,
         services: {
-          ...defaultConfig.services,
+          ...config.services,
           client: {
-            ...defaultConfig.services.client,
+            ...config.services.client,
             buildCommand: 'npm run build',
             linkCommand: 'npm link',
           },
         },
         sync: {
-          ...defaultConfig.sync,
+          ...config.sync,
           autoLink: true,
         },
       };
@@ -452,6 +521,222 @@ describe('DevSyncEngine', () => {
 
       // Clean up
       process.removeListener('unhandledRejection', rejectionHandler);
+    });
+  });
+
+  describe('hash-based change detection', () => {
+    it('should skip sync when spec hash has not changed', async () => {
+      const runtimeConfig: RuntimeConfig = {
+        ...config,
+        services: {
+          ...config.services,
+          backend: {
+            ...config.services.backend,
+            apiSpec: {
+              path: '/openapi.json',
+            },
+          },
+        },
+      };
+
+      // Mock fetch for runtime spec
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ info: { version: '1.0.0' }, paths: {} }),
+      });
+
+      const devSyncWithPolling = new DevSyncEngine(runtimeConfig);
+      const generateClientSpy = jest
+        .spyOn(devSyncWithPolling as any, 'generateClient')
+        .mockResolvedValue(undefined);
+
+      await devSyncWithPolling.start();
+
+      // Trigger first sync
+      await (devSyncWithPolling as any).performSync();
+      expect(generateClientSpy).toHaveBeenCalledTimes(1);
+
+      // Trigger second sync with same spec
+      await (devSyncWithPolling as any).performSync();
+
+      // Should not generate again if hash is the same
+      expect(generateClientSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('should detect changes when spec content changes', async () => {
+      const runtimeConfig: RuntimeConfig = {
+        ...config,
+        services: {
+          ...config.services,
+          backend: {
+            ...config.services.backend,
+            apiSpec: {
+              path: '/openapi.json',
+            },
+          },
+        },
+      };
+
+      // Mock fetch to return different specs
+      let callCount = 0;
+      global.fetch = jest.fn().mockImplementation(async () => {
+        callCount++;
+        return {
+          ok: true,
+          json: async () => ({
+            info: { version: callCount === 1 ? '1.0.0' : '1.0.1' },
+            paths: {},
+          }),
+        };
+      });
+
+      const devSyncWithPolling = new DevSyncEngine(runtimeConfig);
+      const generateClientSpy = jest
+        .spyOn(devSyncWithPolling as any, 'generateClient')
+        .mockResolvedValue(undefined);
+
+      await devSyncWithPolling.start();
+
+      // First sync
+      await (devSyncWithPolling as any).performSync();
+      expect(generateClientSpy).toHaveBeenCalledTimes(1);
+
+      // Second sync with different spec
+      await (devSyncWithPolling as any).performSync();
+      expect(generateClientSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('performance tracking', () => {
+    it('should log step durations when showStepDurations is enabled', async () => {
+      const configWithDurations: RuntimeConfig = {
+        ...config,
+        sync: {
+          ...config.sync,
+          showStepDurations: true,
+        },
+      };
+
+      const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+      const devSyncWithDurations = new DevSyncEngine(configWithDurations);
+
+      // Mock the internal methods
+      jest
+        .spyOn(devSyncWithDurations as any, 'checkForMeaningfulChanges')
+        .mockResolvedValue(true);
+      jest
+        .spyOn(devSyncWithDurations as any, 'generateClient')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(devSyncWithDurations as any, 'buildClient')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(devSyncWithDurations as any, 'linkPackages')
+        .mockResolvedValue(undefined);
+
+      await devSyncWithDurations.start();
+      await (devSyncWithDurations as any).performSync();
+
+      // Should log timing for each step
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('⏱️'),
+        expect.stringContaining('Change detection:'),
+        expect.stringMatching(/\d+ms/)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('⏱️'),
+        expect.stringContaining('Client generation:'),
+        expect.stringMatching(/\d+ms/)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('⏱️'),
+        expect.stringContaining('Client build:'),
+        expect.stringMatching(/\d+ms/)
+      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('⏱️'),
+        expect.stringContaining('Package linking:'),
+        expect.stringMatching(/\d+ms/)
+      );
+
+      // Should log total duration
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('✅'),
+        expect.stringContaining('Synchronization completed successfully'),
+        expect.stringMatching(/\(\d+ms total\)/)
+      );
+
+      consoleLogSpy.mockRestore();
+    });
+
+    it('should not log step durations when showStepDurations is disabled', async () => {
+      const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      // Mock the internal methods
+      jest
+        .spyOn(devSync as any, 'checkForMeaningfulChanges')
+        .mockResolvedValue(true);
+      jest.spyOn(devSync as any, 'generateClient').mockResolvedValue(undefined);
+      jest.spyOn(devSync as any, 'buildClient').mockResolvedValue(undefined);
+      jest.spyOn(devSync as any, 'linkPackages').mockResolvedValue(undefined);
+
+      await devSync.start();
+      await (devSync as any).performSync();
+
+      // Should not log timing information
+      const timingLogs = consoleLogSpy.mock.calls.filter((call) =>
+        call[0]?.includes('⏱️')
+      );
+      expect(timingLogs).toHaveLength(0);
+
+      // Should log simple completion message
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('✅'),
+        'Synchronization completed successfully'
+      );
+
+      consoleLogSpy.mockRestore();
+    });
+  });
+
+  describe('custom spec filename support', () => {
+    it('should use custom OpenAPI spec filename', async () => {
+      const configWithCustomSpec: RuntimeConfig = {
+        ...config,
+        services: {
+          ...config.services,
+          backend: {
+            ...config.services.backend,
+            apiSpec: {
+              path: '/api/v1/openapi.json',
+            },
+          },
+        },
+      };
+
+      // Mock fetch
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ info: { version: '1.0.0' }, paths: {} }),
+      });
+
+      const devSyncCustom = new DevSyncEngine(configWithCustomSpec);
+      const writeFileSyncSpy = jest.fn();
+
+      // Mock fs module
+      jest.doMock('fs', () => ({
+        ...jest.requireActual('fs'),
+        writeFileSync: writeFileSyncSpy,
+      }));
+
+      await devSyncCustom.start();
+      await (devSyncCustom as any).generateClient();
+
+      // Should write to openapi.json (extracted from path)
+      expect(writeFileSyncSpy).toHaveBeenCalledWith(
+        expect.stringContaining('openapi.json'),
+        expect.any(String)
+      );
     });
   });
 });

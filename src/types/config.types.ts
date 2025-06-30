@@ -250,6 +250,11 @@ export interface ClientServiceConfig extends BaseServiceConfig {
    * @default false
    */
   autoInstall?: boolean;
+
+  /**
+   * Environment variables to set when running the service
+   */
+  env?: Record<string, string>;
 }
 
 /**

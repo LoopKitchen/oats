@@ -132,7 +132,7 @@ jobs:
       - name: Verify publication
         run: |
           sleep 10
-          npm view oatsjs@${{ needs.validate.outputs.version }}
+          npm view @tryloop/oats@${{ needs.validate.outputs.version }}
 
   release:
     name: Create GitHub Release
@@ -177,8 +177,8 @@ jobs:
 
       - name: Create release archive
         run: |
-          tar -czf oatsjs-${{ needs.validate.outputs.version }}.tar.gz dist/ package.json README.md LICENSE
-          zip -r oatsjs-${{ needs.validate.outputs.version }}.zip dist/ package.json README.md LICENSE
+          tar -czf oats-${{ needs.validate.outputs.version }}.tar.gz dist/ package.json README.md LICENSE
+          zip -r oats-${{ needs.validate.outputs.version }}.zip dist/ package.json README.md LICENSE
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -189,8 +189,8 @@ jobs:
           draft: false
           prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
           files: |
-            oatsjs-${{ needs.validate.outputs.version }}.tar.gz
-            oatsjs-${{ needs.validate.outputs.version }}.zip
+            oats-${{ needs.validate.outputs.version }}.tar.gz
+            oats-${{ needs.validate.outputs.version }}.zip
           token: ${{ secrets.GITHUB_TOKEN }}
 
   notify:
@@ -202,6 +202,6 @@ jobs:
       - name: Send notification
         if: ${{ needs.release.result == 'success' }}
         run: |
-          echo "Successfully released oatsjs v${{ needs.validate.outputs.version }}"
-          echo "npm: https://www.npmjs.com/package/oatsjs/v/${{ needs.validate.outputs.version }}"
+          echo "Successfully released oats v${{ needs.validate.outputs.version }}"
+          echo "npm: https://www.npmjs.com/package/@tryloop/oats/v/${{ needs.validate.outputs.version }}"
           echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.validate.outputs.version }}"

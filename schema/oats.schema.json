@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/shekhardtu/oatsjs/main/schema/oats.schema.json",
+  "$id": "https://raw.githubusercontent.com/loopkitchen/oats/main/schema/oats.schema.json",
   "title": "OATS Configuration Schema",
   "description": "Schema for oats.config.json - OpenAPI TypeScript Sync configuration",
   "type": "object",

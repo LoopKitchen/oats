@@ -1,10 +1,10 @@
-# 🌾 OATSJS - OpenAPI TypeScript Sync
+# 🌾 OATS - OpenAPI TypeScript Sync
 
 > Stop manually syncing your OpenAPI specs with TypeScript clients. OATS watches your backend API changes and automatically regenerates TypeScript clients in real-time.
 
-[![npm version](https://img.shields.io/npm/v/oatsjs.svg)](https://www.npmjs.com/package/oatsjs)
+[![npm version](https://img.shields.io/npm/v/@tryloop/oats.svg)](https://www.npmjs.com/package/@tryloop/oats)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/node/v/oatsjs.svg)](https://nodejs.org)
+[![Node.js Version](https://img.shields.io/node/v/@tryloop/oats.svg)](https://nodejs.org)
 
 ## 🔥 Features
 
@@ -43,7 +43,7 @@ Every time you change your backend API, you need to:
 OATS automates this entire workflow. Just run:
 
 ```bash
-npx oatsjs start
+npx @tryloop/oats start
 ```
 
 Now when you change your backend API, OATS automatically:
@@ -71,13 +71,13 @@ Now when you change your backend API, OATS automatically:
 
 ## 🚀 Quick Start
 
-### 1. Install OATSJS
+### 1. Install OATS
 
 ```bash
 # In your frontend project (or monorepo root)
-npm install --save-dev oatsjs
+npm install --save-dev @tryloop/oats
 # or
-yarn add -D oatsjs
+yarn add -D @tryloop/oats
 ```
 
 ### 2. Create Configuration
@@ -126,14 +126,14 @@ Create `oats.config.json` in your project root:
 }
 ```
 
-**Note:** Frontend configuration is optional! If you're running oatsjs from your frontend project, it will just sync the backend and client without starting another frontend server.
+**Note:** Frontend configuration is optional! If you're running @tryloop/oats from your frontend project, it will just sync the backend and client without starting another frontend server.
 
 ### Why `port` and `startCommand` are required for frontend
 
 When you do configure a frontend service, both `port` and `startCommand` are **required** because:
 - Different frameworks use different default ports (React: 3000, Vite: 5173, Angular: 4200)
 - Different frameworks use different start commands (`npm start`, `yarn dev`, `ng serve`)
-- This ensures OATSJS knows exactly how to start and monitor your frontend
+- This ensures OATS knows exactly how to start and monitor your frontend
 
 ### 3. Add Script to package.json
 
@@ -141,7 +141,7 @@ When you do configure a frontend service, both `port` and `startCommand` are **r
 {
   "scripts": {
     "dev": "vite",
-    "dev:oats": "oatsjs start"    // Add this
+    "dev:oats": "oats start"    // Add this
   }
 }
 ```
@@ -158,13 +158,13 @@ That's it! Your entire stack is now running with automatic API synchronization.
 
 ```bash
 # npm
-npm install --save-dev oatsjs
+npm install --save-dev @tryloop/oats
 
 # yarn
-yarn add -D oatsjs
+yarn add -D @tryloop/oats
 
 # pnpm
-pnpm add -D oatsjs
+pnpm add -D @tryloop/oats
 ```
 
 ## 🎨 Features
@@ -230,7 +230,7 @@ Works with any OpenAPI client generator:
       "buildCommand": "yarn build",        // Command to build client
       "linkCommand": "yarn link"           // Command to link for local dev
     },
-    "frontend": {                      // OPTIONAL - only if you want oatsjs to start it
+    "frontend": {                      // OPTIONAL - only if you want @tryloop/oats to start it
       "path": ".",                    // Path to frontend
       "port": 5173,                   // REQUIRED - Must match your dev server port
       "startCommand": "yarn dev",     // REQUIRED - Your dev server command
@@ -293,7 +293,7 @@ Enable performance tracking and optimizations:
 
 For Python backends like FastAPI that generate OpenAPI specs at runtime:
 - Use runtime endpoints for the API spec path (recommended)
-- OATSJS will fetch the spec from the running server
+- OATS will fetch the spec from the running server
 - Make sure your backend is configured to expose the OpenAPI spec
 
 Example for FastAPI:
@@ -307,7 +307,7 @@ Example for FastAPI:
 
 ### Minimal Configuration
 
-If you're running oatsjs from your frontend project, here's the minimal config:
+If you're running @tryloop/oats from your frontend project, here's the minimal config:
 
 ```json
 {
@@ -359,11 +359,11 @@ If you're running oatsjs from your frontend project, here's the minimal config:
 
 ## 🛠️ CLI Commands
 
-### `oatsjs start`
+### `@tryloop/oats start`
 Start all services with automatic synchronization.
 
 ```bash
-oatsjs start [options]
+@tryloop/oats start [options]
 
 Options:
   --init-gen        Run initial client generation on startup
@@ -375,47 +375,47 @@ Options:
 **Examples:**
 ```bash
 # Start with default config
-oatsjs start
+@tryloop/oats start
 
 # Generate client before starting (useful for first run)
-oatsjs start --init-gen
+@tryloop/oats start --init-gen
 
 # Use custom config file
-oatsjs start --config my-oats.config.json
+@tryloop/oats start --config my-oats.config.json
 
-# Quiet mode - only oatsjs messages, no service output
-oatsjs start --quiet
+# Quiet mode - only @tryloop/oats messages, no service output
+@tryloop/oats start --quiet
 
 # Disable colors
-oatsjs start --no-colors
+@tryloop/oats start --no-colors
 ```
 
-### `oatsjs init`
+### `@tryloop/oats init`
 Interactively create a configuration file.
 
 ```bash
-oatsjs init [options]
+@tryloop/oats init [options]
 
 Options:
   -f, --force       Overwrite existing configuration
   -y, --yes         Use defaults without prompting
 ```
 
-### `oatsjs validate`
+### `@tryloop/oats validate`
 Check if your configuration is valid.
 
 ```bash
-oatsjs validate [options]
+@tryloop/oats validate [options]
 
 Options:
   -c, --config      Path to config file
 ```
 
-### `oatsjs detect`
+### `@tryloop/oats detect`
 Auto-detect your project structure and create config.
 
 ```bash
-oatsjs detect
+@tryloop/oats detect
 ```
 
 **Note:** This will scan your project and try to find:
@@ -607,15 +607,15 @@ export default defineConfig({
 })
 ```
 
-### Issue: "Command not found: oatsjs"
+### Issue: "Command not found: @tryloop/oats"
 **Solution:** Use npx or add to package.json scripts:
 ```bash
 # Direct usage
-npx oatsjs start
+npx @tryloop/oats start
 
 # Or add to package.json
 "scripts": {
-  "dev:sync": "oatsjs start"
+  "dev:sync": "@tryloop/oats start"
 }
 ```
 
@@ -733,7 +733,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ```bash
 # Clone the repository
-git clone https://github.com/shekhardtu/oatsjs.git
+git clone https://github.com/loopkitchen/oats.git
 
 # Install dependencies
 npm install
@@ -764,8 +764,8 @@ OATS is inspired by the challenges faced by developers working with OpenAPI spec
 </p>
 
 <p align="center">
-  <a href="https://github.com/shekhardtu/oatsjs">GitHub</a> •
-  <a href="https://www.npmjs.com/package/oatsjs">npm</a> •
-  <a href="https://github.com/shekhardtu/oatsjs/issues">Issues</a> •
-  <a href="https://github.com/shekhardtu/oatsjs/discussions">Discussions</a>
+  <a href="https://github.com/loopkitchen/oats">GitHub</a> •
+  <a href="https://www.npmjs.com/package/@tryloop/oats">npm</a> •
+  <a href="https://github.com/loopkitchen/oats/issues">Issues</a> •
+  <a href="https://github.com/loopkitchen/oats/discussions">Discussions</a>
 </p>

@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest an idea for oatsjs
+description: Suggest an idea for oats
 title: "[Feature]: "
 labels: ["enhancement", "feature-request"]
 assignees: []
@@ -39,13 +39,13 @@ body:
       label: Proposed Solution
       description: Describe the solution you'd like to see implemented.
       placeholder: |
-        I would like oatsjs to support...
+        I would like oats to support...
         
         This could work by...
         
         Example usage:
         ```bash
-        oatsjs new-command --flag value
+        oats new-command --flag value
         ```
     validations:
       required: true
@@ -125,7 +125,7 @@ body:
         }
         
         // Example 2: CLI Usage
-        oatsjs generate --with-new-feature
+        oats generate --with-new-feature
         
         // Example 3: Generated Code
         export interface GeneratedType {

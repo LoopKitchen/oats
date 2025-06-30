@@ -1,286 +1,562 @@
 /**
- * Orchestrator Tests
+ * Tests for DevSyncOrchestrator
  */
 
-import EventEmitter from 'events';
-
-import { execa } from 'execa';
-
-import detectPort from 'detect-port';
-
-import { DevSyncOrchestrator } from '../orchestrator';
+import { EventEmitter } from 'events';
+import { DevSyncEngine } from '../dev-sync-optimized.js';
+import { DevSyncOrchestrator } from '../orchestrator.js';
+import { Logger } from '../../utils/logger.js';
+import { PortManager } from '../../utils/port-manager.js';
+import { ProcessManager } from '../../utils/process-manager.js';
+import * as fs from 'fs';
+import { DebugManager } from '../../utils/debug.js';
+import type { RuntimeConfig } from '../../types/config.types.js';
 
 // Mock dependencies
-jest.mock('execa');
-jest.mock('detect-port', () => {
-  return jest.fn().mockImplementation((port: number) => Promise.resolve(port));
-});
-jest.mock('../dev-sync-optimized', () => ({
-  DevSyncEngine: jest.fn().mockImplementation(() => ({
-    start: jest.fn(),
-    stop: jest.fn(),
-    on: jest.fn(),
-  })),
+jest.mock('util', () => ({
+  promisify: jest.fn(() => jest.fn()),
+  deprecate: jest.fn((fn) => fn),
+  inspect: jest.fn(),
+  format: jest.fn(),
+  inherits: jest.fn(),
 }));
+jest.mock('detect-port', () => jest.fn().mockResolvedValue(3001));
+jest.mock('../../utils/process-manager.js');
+jest.mock('child_process', () => ({
+  spawn: jest.fn().mockReturnValue({
+    on: jest.fn(),
+    stdout: { on: jest.fn() },
+    stderr: { on: jest.fn() },
+    kill: jest.fn(),
+  }),
+  exec: jest.fn(),
+}));
+jest.mock('chokidar', () => ({
+  watch: jest.fn().mockReturnValue({
+    on: jest.fn(),
+    close: jest.fn(),
+  }),
+}));
+jest.mock('../../utils/port-manager.js');
+jest.mock('../../utils/logger.js');
+jest.mock('../../utils/debug.js');
+jest.mock('../dev-sync-optimized.js');
 
-const mockExeca = execa as jest.MockedFunction<typeof execa>;
-const mockDetectPort = jest.mocked(detectPort);
+// Mock chalk to avoid color codes in tests
+jest.mock('chalk', () => {
+  const mockChalk = (str: string) => str;
+  mockChalk.bold = (str: string) => str;
+
+  return {
+    default: {
+      blue: Object.assign((str: string) => str, { bold: (str: string) => str }),
+      green: Object.assign((str: string) => str, {
+        bold: (str: string) => str,
+      }),
+      yellow: Object.assign((str: string) => str, {
+        bold: (str: string) => str,
+      }),
+      red: Object.assign((str: string) => str, { bold: (str: string) => str }),
+      dim: (str: string) => str,
+    },
+    blue: Object.assign((str: string) => str, { bold: (str: string) => str }),
+    green: Object.assign((str: string) => str, { bold: (str: string) => str }),
+    yellow: Object.assign((str: string) => str, { bold: (str: string) => str }),
+    red: Object.assign((str: string) => str, { bold: (str: string) => str }),
+    dim: (str: string) => str,
+  };
+});
 
 describe('DevSyncOrchestrator', () => {
   let orchestrator: DevSyncOrchestrator;
-  let mockProcess: any;
-  const defaultConfig = {
-    services: {
-      backend: {
-        path: '../backend',
-        startCommand: 'npm run dev',
-        port: 4000,
-        apiSpec: {
-          path: 'src/swagger.json',
-        },
-      },
-      client: {
-        path: '../client',
-        packageName: '@test/client',
-        generator: 'custom',
-        generateCommand: 'npm run generate',
-      },
-    },
-    resolvedPaths: {
-      backend: '/test/backend',
-      client: '/test/client',
-      apiSpec: '/test/backend/src/swagger.json',
-    },
-    sync: {
-      debounceMs: 100,
-      strategy: 'conservative',
-    },
-  };
+  let mockConfig: RuntimeConfig;
+  let mockProcessManager: jest.Mocked<ProcessManager>;
+  let mockChildProcess: any;
+  let originalExit: typeof process.exit;
 
   beforeEach(() => {
-    orchestrator = new DevSyncOrchestrator(defaultConfig as any);
+    jest.clearAllMocks();
 
-    mockProcess = new EventEmitter();
-    mockProcess.stdout = new EventEmitter();
-    mockProcess.stderr = new EventEmitter();
-    mockProcess.kill = jest.fn();
-    mockProcess.killed = false;
+    // Clear module mocks to ensure fresh instances
+    jest.clearAllMocks();
+    jest.resetModules();
 
-    mockExeca.mockReturnValue(mockProcess);
+    // Mock process.exit to prevent test from exiting
+    originalExit = process.exit;
+    process.exit = jest.fn() as any;
 
-    // Mock detect-port to return available ports by default
-    mockDetectPort.mockImplementation(async (port: number) => port);
+    // Create mock config
+    mockConfig = {
+      services: {
+        backend: {
+          path: '../backend',
+          startCommand: 'npm run dev',
+          port: 4000,
+          apiSpec: {
+            path: 'src/swagger.json',
+          },
+        },
+        client: {
+          path: '../client',
+          packageName: '@test/client',
+          generator: 'custom' as const,
+          generateCommand: 'npm run generate',
+        },
+        frontend: {
+          path: '../frontend',
+          startCommand: 'npm start',
+          port: 3000,
+        },
+      },
+      resolvedPaths: {
+        backend: '/test/backend',
+        client: '/test/client',
+        frontend: '/test/frontend',
+        apiSpec: '/test/backend/src/swagger.json',
+      },
+      sync: {},
+      log: {},
+      packageManager: 'npm' as const,
+      isCI: false,
+      startedAt: new Date(),
+      version: '1.0.0',
+      metadata: {},
+    } as RuntimeConfig;
+
+    // Mock child process
+    mockChildProcess = new EventEmitter();
+    mockChildProcess.stdout = new EventEmitter();
+    mockChildProcess.stderr = new EventEmitter();
+    mockChildProcess.kill = jest.fn();
+    mockChildProcess.pid = 12345;
+
+    // Setup ProcessManager mock
+    mockProcessManager = {
+      startProcess: jest.fn().mockReturnValue(mockChildProcess),
+      killProcess: jest.fn().mockResolvedValue(undefined),
+      killAll: jest.fn().mockResolvedValue(undefined),
+    } as any;
+    (
+      ProcessManager as jest.MockedClass<typeof ProcessManager>
+    ).mockImplementation(() => mockProcessManager);
+
+    // Setup PortManager mock
+    (PortManager.isPortInUse as jest.Mock).mockResolvedValue(false);
+    (PortManager.freePort as jest.Mock).mockResolvedValue(undefined);
+
+    // Setup Logger mock
+    (Logger as jest.MockedClass<typeof Logger>).mockImplementation(
+      () =>
+        ({
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+        }) as any
+    );
+
+    // Setup DebugManager mock
+    (DebugManager.init as jest.Mock).mockReturnValue(undefined);
+    (DebugManager.section as jest.Mock).mockReturnValue(undefined);
+
+    // Setup DevSyncEngine mock
+    const mockSyncEngine = new EventEmitter() as any;
+    mockSyncEngine.start = jest.fn().mockResolvedValue(undefined);
+    mockSyncEngine.stop = jest.fn().mockResolvedValue(undefined);
+    (
+      DevSyncEngine as jest.MockedClass<typeof DevSyncEngine>
+    ).mockImplementation(() => mockSyncEngine);
+
+    // Mock fs.existsSync for package manager detection
+    jest.spyOn(fs, 'existsSync').mockReturnValue(false);
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    jest.restoreAllMocks();
+
+    // Restore original process.exit
+    process.exit = originalExit;
+
+    // Clean up event listeners to prevent warnings
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('SIGTERM');
+    process.removeAllListeners('uncaughtException');
+  });
+
+  describe('constructor', () => {
+    it('should initialize services and set up signal handlers', () => {
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      expect(ProcessManager).toHaveBeenCalled();
+      expect(Logger).toHaveBeenCalledWith('Orchestrator');
+      expect(DebugManager.init).toHaveBeenCalledWith(false);
+    });
+
+    it('should set log file if configured', () => {
+      mockConfig.log.file = '/path/to/log.txt';
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      expect(Logger.setLogFile).toHaveBeenCalledWith('/path/to/log.txt');
+    });
+
+    it('should initialize debug mode if log level is debug', () => {
+      mockConfig.log.level = 'debug';
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      expect(DebugManager.init).toHaveBeenCalledWith(true);
+    });
   });
 
   describe('start', () => {
-    it('should start backend service successfully', async () => {
-      // Mock port as in use to trigger port-based detection
-      mockDetectPort.mockImplementation(async (port: number) => {
-        // First call returns port is free, subsequent calls show port in use
-        if (mockDetectPort.mock.calls.length <= 1) {
-          return port; // Port is free
-        }
-        return port + 1; // Port is now in use
-      });
-
-      const startPromise = orchestrator.start();
-
-      // Wait for initial port check and service start
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      expect(mockExeca).toHaveBeenCalledWith(
-        'npm run dev',
-        expect.objectContaining({
-          cwd: '/test/backend',
-          shell: true,
-          stdio: ['inherit', 'pipe', 'pipe'],
-          preferLocal: true,
-          localDir: '/test/backend',
-        })
-      );
-
-      // Wait for port detection interval to fire
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      await startPromise;
-    }, 10000);
-
-    it('should handle service startup failure', async () => {
-      // Simulate service failure
-      setTimeout(() => {
-        mockProcess.emit('exit', 1);
-      }, 10);
-
-      await expect(orchestrator.start()).rejects.toThrow();
-    }, 10000);
-
-    it('should pass environment variables to services', async () => {
-      // Create new orchestrator with env config
-      const configWithEnv = {
-        ...defaultConfig,
-        services: {
-          ...defaultConfig.services,
-          backend: {
-            ...defaultConfig.services.backend,
-            env: {
-              NODE_ENV: 'development',
-              API_PORT: '4000',
-            },
-          },
-        },
-        resolvedPaths: defaultConfig.resolvedPaths,
-        sync: defaultConfig.sync,
-      };
-
-      orchestrator = new DevSyncOrchestrator(configWithEnv as any);
-
-      // Mock port detection
-      mockDetectPort.mockImplementation(async (port: number) => {
-        if (mockDetectPort.mock.calls.length <= 1) {
-          return port;
-        }
-        return port + 1;
-      });
-
-      const startPromise = orchestrator.start();
-
-      // Wait for port detection
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      expect(mockExeca).toHaveBeenCalledWith(
-        'npm run dev',
-        expect.objectContaining({
-          cwd: '/test/backend',
-          env: expect.objectContaining({
-            NODE_ENV: 'development',
-            API_PORT: '4000',
-          }),
-        })
-      );
-
-      await startPromise;
-    }, 10000);
-  });
-
-  describe('stop', () => {
-    it('should stop all running services', async () => {
-      // Mock port detection
-      mockDetectPort.mockImplementation(async (port: number) => {
-        if (mockDetectPort.mock.calls.length <= 1) {
-          return port;
-        }
-        return port + 1;
-      });
-
-      // Start services first
-      const startPromise = orchestrator.start();
-
-      // Wait for port detection
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      await startPromise;
-
-      // Mock the process exit when kill is called
-      mockProcess.kill.mockImplementation(() => {
-        setTimeout(() => mockProcess.emit('exit', 0), 10);
-      });
-
-      // Stop services
-      await orchestrator.stop();
-
-      expect(mockProcess.kill).toHaveBeenCalled();
-    }, 10000);
-  });
-
-  describe('getStatus', () => {
-    it('should return status of all services', () => {
-      const statuses = orchestrator.getStatus();
-      expect(Array.isArray(statuses)).toBe(true);
+    beforeEach(() => {
+      orchestrator = new DevSyncOrchestrator(mockConfig);
     });
 
-    it('should include service details in status', async () => {
-      // Mock port detection
-      mockDetectPort.mockImplementation(async (port: number) => {
-        if (mockDetectPort.mock.calls.length <= 1) {
-          return port;
-        }
-        return port + 1;
+    it('should start all services in correct order', async () => {
+      // Mock port checks to succeed after services "start"
+      let portCheckCount = 0;
+      (PortManager.isPortInUse as jest.Mock).mockImplementation(() => {
+        portCheckCount++;
+        return Promise.resolve(portCheckCount > 2);
       });
 
-      const startPromise = orchestrator.start();
+      // Make link commands complete quickly
+      mockProcessManager.startProcess.mockImplementation((_cmd, args) => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = jest.fn();
 
-      // Wait for port detection
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      await startPromise;
-
-      const statuses = orchestrator.getStatus();
-      expect(statuses.length).toBeGreaterThan(0);
-      expect(statuses[0]).toHaveProperty('name');
-      expect(statuses[0]).toHaveProperty('status');
-      expect(statuses[0]).toHaveProperty('port');
-    }, 10000);
-  });
-
-  describe('event handling', () => {
-    it('should emit ready event when services start', async () => {
-      const eventSpy = jest.fn();
-      orchestrator.on('ready', eventSpy);
-
-      // Mock port detection
-      mockDetectPort.mockImplementation(async (port: number) => {
-        if (mockDetectPort.mock.calls.length <= 1) {
-          return port;
+        // Complete link commands immediately
+        if (args[0] === 'link') {
+          setTimeout(() => proc.emit('exit', 0), 10);
         }
-        return port + 1;
+
+        return proc;
       });
 
-      const startPromise = orchestrator.start();
+      await orchestrator.start();
 
-      // Wait for port detection
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      await startPromise;
-
-      expect(eventSpy).toHaveBeenCalled();
-    }, 10000);
-
-    it('should emit service-error events on crash', async () => {
-      const errorSpy = jest.fn();
-      orchestrator.on('service-error', errorSpy);
-
-      // First start successfully
-      // Mock port detection
-      mockDetectPort.mockImplementation(async (port: number) => {
-        if (mockDetectPort.mock.calls.length <= 1) {
-          return port;
-        }
-        return port + 1;
-      });
-
-      const startPromise = orchestrator.start();
-
-      // Wait for port detection and service to be marked as ready
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      await startPromise;
-
-      // Then simulate crash
-      mockProcess.emit('exit', 1);
-
-      // Wait for event to be emitted
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(errorSpy).toHaveBeenCalledWith(
+      // Verify link commands were called first
+      expect(mockProcessManager.startProcess).toHaveBeenCalledWith(
+        'npm',
+        ['link'],
         expect.objectContaining({
-          name: 'backend',
-          error: expect.any(Error),
+          cwd: '/test/client',
+        })
+      );
+
+      expect(mockProcessManager.startProcess).toHaveBeenCalledWith(
+        'npm',
+        ['link', '@test/client'],
+        expect.objectContaining({
+          cwd: '/test/frontend',
+        })
+      );
+
+      // Verify services started after linking
+      expect(mockProcessManager.startProcess).toHaveBeenCalledWith(
+        'npm',
+        ['run', 'dev'],
+        expect.objectContaining({
+          cwd: '/test/backend',
+        })
+      );
+
+      expect(mockProcessManager.startProcess).toHaveBeenCalledWith(
+        'npm',
+        ['run', 'generate'],
+        expect.objectContaining({
+          cwd: '/test/client',
+        })
+      );
+
+      // Check frontend process was started
+      expect(mockProcessManager.startProcess).toHaveBeenCalledWith(
+        'npm',
+        ['start'],
+        expect.objectContaining({
+          cwd: '/test/frontend',
+        })
+      );
+
+      // Verify sync engine started
+      expect(DevSyncEngine).toHaveBeenCalledWith(mockConfig);
+
+      // The sync engine instance should have start called
+      const syncInstances = (
+        DevSyncEngine as jest.MockedClass<typeof DevSyncEngine>
+      ).mock.instances;
+      expect(syncInstances.length).toBeGreaterThan(0);
+
+      // Since we've verified length > 0, we can safely access the first instance
+      const mockSyncEngine = syncInstances[0] as any;
+      expect(mockSyncEngine.start).toHaveBeenCalled();
+    }, 10000);
+
+    it('should handle backend service without frontend', async () => {
+      delete mockConfig.services.frontend;
+      delete mockConfig.resolvedPaths.frontend;
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      // Mock port checks
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(true);
+
+      await orchestrator.start();
+
+      // Should only start backend and client
+      expect(mockProcessManager.startProcess).toHaveBeenCalledTimes(2);
+    });
+
+    it('should emit serviceStateChange events', async () => {
+      const stateChangeSpy = jest.fn();
+      orchestrator.on('serviceStateChange', stateChangeSpy);
+
+      // Mock port checks to succeed immediately
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(true);
+
+      // Make all processes complete quickly
+      mockProcessManager.startProcess.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = jest.fn();
+        setTimeout(() => proc.emit('exit', 0), 10);
+        return proc;
+      });
+
+      await orchestrator.start();
+
+      // Should emit state changes for each service
+      expect(stateChangeSpy).toHaveBeenCalled();
+      expect(stateChangeSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          service: expect.any(String),
+          state: expect.any(String),
         })
       );
     }, 10000);
+
+    it('should handle quiet mode', async () => {
+      mockConfig.log.quiet = true;
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      // Mock port checks to succeed immediately
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(true);
+
+      // Make all processes complete quickly
+      mockProcessManager.startProcess.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = jest.fn();
+        setTimeout(() => proc.emit('exit', 0), 10);
+        return proc;
+      });
+
+      await orchestrator.start();
+
+      // Should not log success message in quiet mode
+      expect(consoleSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('All services started successfully')
+      );
+
+      consoleSpy.mockRestore();
+    }, 10000);
+
+    it('should shutdown on start failure', async () => {
+      // Make port checks fail
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(false);
+
+      // Make all processes complete quickly to avoid timeout
+      mockProcessManager.startProcess.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = jest.fn();
+        setTimeout(() => proc.emit('exit', 0), 10);
+        return proc;
+      });
+
+      const shutdownSpy = jest
+        .spyOn(orchestrator, 'shutdown')
+        .mockResolvedValue(undefined);
+
+      await expect(orchestrator.start()).rejects.toThrow();
+
+      expect(shutdownSpy).toHaveBeenCalled();
+    }, 15000);
+  });
+
+  describe('shutdown', () => {
+    beforeEach(async () => {
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+      // Mock port checks to succeed immediately
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(true);
+
+      // Make all processes complete quickly
+      mockProcessManager.startProcess.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = jest.fn();
+        setTimeout(() => proc.emit('exit', 0), 10);
+        return proc;
+      });
+
+      await orchestrator.start();
+    });
+
+    it('should stop all services and sync engine', async () => {
+      await orchestrator.shutdown();
+
+      // Verify sync engine stopped
+      const syncInstances = (
+        DevSyncEngine as jest.MockedClass<typeof DevSyncEngine>
+      ).mock.instances;
+      expect(syncInstances.length).toBeGreaterThan(0);
+
+      // Since we've verified length > 0, we can safely access the first instance
+      const mockSyncEngine = syncInstances[0] as any;
+      expect(mockSyncEngine.stop).toHaveBeenCalled();
+
+      // Verify process manager killed all processes
+      expect(mockProcessManager.killAll).toHaveBeenCalled();
+
+      expect(process.exit).toHaveBeenCalledWith(0);
+    });
+
+    it('should only shutdown once', async () => {
+      const shutdownPromise1 = orchestrator.shutdown();
+      const shutdownPromise2 = orchestrator.shutdown();
+
+      await Promise.all([shutdownPromise1, shutdownPromise2]);
+
+      // killAll should only be called once
+      expect(mockProcessManager.killAll).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('package linking', () => {
+    it('should link client package to frontend', async () => {
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      // Mock port checks
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(true);
+
+      // Track commands executed
+      const commands: string[] = [];
+      mockProcessManager.startProcess.mockImplementation((cmd, args) => {
+        commands.push(`${cmd} ${args.join(' ')}`);
+
+        // Return a mock process that completes successfully
+        const mockProc = new EventEmitter();
+        setTimeout(() => mockProc.emit('exit', 0), 10);
+        return mockProc as any;
+      });
+
+      await orchestrator.start();
+
+      // Should have linked the package
+      expect(commands).toContain('npm link');
+      expect(commands).toContain('npm link @test/client');
+    });
+  });
+
+  describe('config file watching', () => {
+    it('should watch config file for changes', async () => {
+      // Get the mocked chokidar module
+      // Using jest's module mocking system
+      const chokidar = jest.requireMock('chokidar');
+      const mockWatcher = {
+        on: jest.fn(),
+        close: jest.fn(),
+      };
+
+      // Reset the mock
+      (chokidar.watch as jest.Mock).mockReturnValue(mockWatcher);
+
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      // Mock port checks to succeed immediately
+      (PortManager.isPortInUse as jest.Mock).mockResolvedValue(true);
+
+      // Make all processes complete quickly
+      mockProcessManager.startProcess.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        proc.kill = jest.fn();
+        setTimeout(() => proc.emit('exit', 0), 10);
+        return proc;
+      });
+
+      await orchestrator.start();
+
+      // Config watching happens in start()
+      const watchMock = chokidar.watch as jest.Mock;
+      expect(watchMock).toHaveBeenCalled();
+
+      // Check the first call to watch was for config file
+      const watchCalls = watchMock.mock.calls;
+      const configWatchCall = watchCalls.find(
+        (call: any[]) => call[0] === 'oats.config.json'
+      );
+      expect(configWatchCall).toBeDefined();
+
+      // We've verified configWatchCall is defined above, so we can safely check its properties
+      // Get the call and verify its options
+      const callOptions = configWatchCall ? configWatchCall[1] : null;
+      expect(callOptions).toEqual({
+        persistent: true,
+        ignoreInitial: true,
+      });
+
+      expect(mockWatcher.on).toHaveBeenCalledWith(
+        'change',
+        expect.any(Function)
+      );
+    }, 10000);
+  });
+
+  describe('signal handlers', () => {
+    it('should handle SIGINT gracefully', async () => {
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      const shutdownSpy = jest
+        .spyOn(orchestrator, 'shutdown')
+        .mockResolvedValue(undefined);
+
+      // Emit SIGINT
+      process.emit('SIGINT' as any);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(shutdownSpy).toHaveBeenCalled();
+    });
+
+    it('should handle uncaught exceptions', async () => {
+      orchestrator = new DevSyncOrchestrator(mockConfig);
+
+      const shutdownSpy = jest
+        .spyOn(orchestrator, 'shutdown')
+        .mockResolvedValue(undefined);
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      // Emit uncaught exception
+      process.emit('uncaughtException', new Error('Test error'));
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Uncaught exception'),
+        expect.any(Error)
+      );
+      expect(shutdownSpy).toHaveBeenCalled();
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 });

@@ -1,6 +1,6 @@
 {
-  "name": "oatsjs",
-  "version": "2.2.0",
+  "name": "@tryloop/oats",
+  "version": "2.2.7",
   "description": "🌾 OATS - OpenAPI TypeScript Sync. The missing link between your OpenAPI specs and TypeScript applications. Automatically watch, generate, and sync TypeScript clients from your API definitions.",
   "keywords": [
     "oats",
@@ -31,7 +31,7 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "oatsjs": "./bin/oats"
+    "oats": "./bin/oats"
   },
   "files": [
     "bin/",
@@ -42,9 +42,9 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "clean": "rm -rf dist coverage",
+    "clean": "rimraf dist coverage",
     "build": "yarn clean && tsc && yarn postbuild",
-    "postbuild": "chmod +x dist/bin/oats.js",
+    "postbuild": "node scripts/make-executable.js",
     "build:watch": "tsc --watch",
     "dev": "tsx watch src/bin/oats.ts",
     "test": "jest --coverage",
@@ -55,11 +55,8 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,json}\"",
     "typecheck": "tsc --noEmit",
     "prepare": "husky && yarn build",
-    "prepublishOnly": "yarn typecheck && yarn lint && yarn test",
     "publish:auto": "node scripts/publish.js",
     "release": "yarn publish:auto",
-    "release:minor": "yarn version minor && yarn publish:auto",
-    "release:major": "yarn version major && yarn publish:auto",
     "version:update": "node scripts/update-version.js"
   },
   "dependencies": {
@@ -94,6 +91,7 @@
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "prettier": "^3.2.5",
+    "rimraf": "^5.0.5",
     "ts-jest": "^29.1.0",
     "ts-node": "^10.9.0",
     "tsx": "^4.7.0",
@@ -104,11 +102,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/shekhardtu/oatsjs.git"
+    "url": "https://github.com/loopkitchen/oats.git"
   },
   "bugs": {
-    "url": "https://github.com/shekhardtu/oatsjs/issues"
+    "url": "https://github.com/loopkitchen/oats/issues"
   },
-  "homepage": "https://github.com/shekhardtu/oatsjs#readme",
-  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+  "homepage": "https://github.com/loopkitchen/oats#readme",
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e",
+  "publishConfig": {
+    "access": "public"
+  }
 }

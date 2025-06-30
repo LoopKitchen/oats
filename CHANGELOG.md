@@ -44,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cleaner logging**: Verbose port checking logs now only show in debug mode
 
 ### Fixed
-- Fixed "Permission denied" error when running oatsjs command after npm/yarn global installation
+- Fixed "Permission denied" error when running oats command after npm/yarn global installation
 - Fixed port detection reliability issues on macOS/Linux by using lsof command directly
 - Fixed binary execution issues by adding proper bin wrapper script
 - Fixed Windows compatibility for port detection and process killing
@@ -99,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration validation now properly handles all edge cases
 - Frontend configuration is now properly optional
 - Sync configuration uses sensible defaults
-- Linked packages are now properly unlinked when stopping oatsjs
+- Linked packages are now properly unlinked when stopping oats
 
 ## [1.0.5] - 2024-06-28
 
@@ -146,10 +146,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TypeScript client generation
 - Hot-reload support
 
-[Unreleased]: https://github.com/shekhardtu/oatsjs/compare/v1.0.5...HEAD
-[1.0.5]: https://github.com/shekhardtu/oatsjs/compare/v1.0.4...v1.0.5
-[1.0.4]: https://github.com/shekhardtu/oatsjs/compare/v1.0.3...v1.0.4
-[1.0.3]: https://github.com/shekhardtu/oatsjs/compare/v1.0.2...v1.0.3
-[1.0.2]: https://github.com/shekhardtu/oatsjs/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/shekhardtu/oatsjs/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/shekhardtu/oatsjs/releases/tag/v1.0.0
+[Unreleased]: https://github.com/loopkitchen/oats/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/loopkitchen/oats/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/loopkitchen/oats/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/loopkitchen/oats/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/loopkitchen/oats/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/loopkitchen/oats/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/loopkitchen/oats/releases/tag/v1.0.0

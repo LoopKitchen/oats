@@ -14,9 +14,9 @@ updates:
       - "dependencies"
       - "npm"
     reviewers:
-      - "shekhardtu"
+      - "loopkitchen"
     assignees:
-      - "shekhardtu"
+      - "loopkitchen"
     commit-message:
       prefix: "chore"
       prefix-development: "chore"
@@ -62,9 +62,9 @@ updates:
       - "dependencies"
       - "github-actions"
     reviewers:
-      - "shekhardtu"
+      - "loopkitchen"
     assignees:
-      - "shekhardtu"
+      - "loopkitchen"
     commit-message:
       prefix: "chore"
       include: "scope"

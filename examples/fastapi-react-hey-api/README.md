@@ -27,7 +27,7 @@ fastapi-react-hey-api/
 - Python 3.8+
 - Node.js 18+
 - npm or yarn
-- OATSJS CLI: `npm install -g oatsjs`
+- OATS CLI: `npm install -g @tryloop/oats`
 
 ## Quick Start
 
@@ -70,7 +70,7 @@ From the frontend directory:
 
 ```bash
 cd frontend
-oatsjs start
+oats start
 ```
 
 This will:

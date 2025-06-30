@@ -115,26 +115,13 @@ export async function start(options: StartOptions): Promise<void> {
     // Create orchestrator
     const orchestrator = new DevSyncOrchestrator(runtimeConfig);
 
-    // Handle graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log(chalk.yellow('\n\nShutting down OATS...'));
-      await orchestrator.stop();
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-      await orchestrator.stop();
-      process.exit(0);
-    });
-
-    // Start the orchestrator
+    // Start the orchestrator (signal handlers are set up internally)
     await orchestrator.start();
 
     // If one-time generation, exit after completion
     if (options.oneTime) {
       console.log(chalk.green('\n✅ Generation complete!'));
-      await orchestrator.stop();
-      process.exit(0);
+      await orchestrator.shutdown();
     }
   } catch (error) {
     console.error(chalk.red('\n❌ Failed to start OATS:'));

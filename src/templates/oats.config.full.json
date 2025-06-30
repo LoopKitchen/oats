@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/shekhardtu/oatsjs/main/schema/oats.schema.json",
+  "$schema": "https://raw.githubusercontent.com/loopkitchen/oats/main/schema/oats.schema.json",
   "version": "1.0.0",
   "services": {
     "backend": {

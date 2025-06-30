@@ -15,6 +15,7 @@ import { watch } from 'chokidar';
 import debounce from 'lodash.debounce';
 
 import { ApiSpecError, GeneratorError } from '../errors/index.js';
+import { PlatformUtils } from '../utils/platform.js';
 
 import { SwaggerChangeDetector } from './swagger-diff.js';
 
@@ -53,11 +54,10 @@ export class DevSyncEngine extends EventEmitter {
     this.config = config;
     this.changeDetector = new SwaggerChangeDetector();
 
-    // Setup debounced sync function
-    this.debouncedSync = debounce(
-      this.performSync.bind(this),
-      this.config.sync.debounceMs || 1000
-    );
+    // Setup debounced sync function with platform-specific timing
+    const debounceMs =
+      this.config.sync.debounceMs || PlatformUtils.getFileWatcherDebounce();
+    this.debouncedSync = debounce(this.performSync.bind(this), debounceMs);
   }
 
   /**
@@ -72,10 +72,15 @@ export class DevSyncEngine extends EventEmitter {
 
     if (isRuntimeSpec) {
       // For runtime specs, use polling instead of file watching
-      console.log(chalk.blue('👁️  Starting OpenAPI spec polling...'));
+      if (!this.config.log?.quiet) {
+        console.log(chalk.blue('👁️  Starting OpenAPI spec polling...'));
+      }
 
       const pollIntervalMs = this.config.sync.pollingInterval || 5000; // Default 5 seconds
-      console.log(chalk.dim(`📊 Polling interval: ${pollIntervalMs}ms`));
+
+      if (!this.config.log?.quiet) {
+        console.log(chalk.dim(`📊 Polling interval: ${pollIntervalMs}ms`));
+      }
 
       // Start polling
       this.pollingInterval = setInterval(() => {
@@ -83,14 +88,22 @@ export class DevSyncEngine extends EventEmitter {
       }, pollIntervalMs);
 
       this.isRunning = true;
-      console.log(chalk.green('✅ OpenAPI spec polling started'));
+
+      if (!this.config.log?.quiet) {
+        console.log(chalk.green('✅ OpenAPI spec polling started'));
+      }
     } else {
       // For static specs, use file watching
-      console.log(chalk.blue('👁️  Starting file watcher...'));
+      if (!this.config.log?.quiet) {
+        console.log(chalk.blue('👁️  Starting file watcher...'));
+      }
 
       try {
         const watchPaths = this.getWatchPaths();
-        console.log(chalk.dim('📂 Watching paths:'), watchPaths);
+
+        if (!this.config.log?.quiet) {
+          console.log(chalk.dim('📂 Watching paths:'), watchPaths);
+        }
 
         const ignored = this.config.sync.ignore || [
           '**/node_modules/**',
@@ -647,10 +660,7 @@ export class DevSyncEngine extends EventEmitter {
             'src',
             '.oats-sync'
           );
-          await this.runCommand(
-            `touch ${touchFile}`,
-            this.config.resolvedPaths.frontend!
-          );
+          await PlatformUtils.touchFile(touchFile);
           console.log(chalk.dim('Triggered frontend HMR'));
         } catch (err) {
           // Ignore errors, this is optional

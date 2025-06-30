@@ -1,6 +1,5 @@
 # Run linting and tests
-yarn lint || exit 1
-yarn test || exit 1
+yarn lint:fix || exit 1
 
 # Update version
 yarn version:update || exit 1

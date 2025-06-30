@@ -1,655 +1,500 @@
 /**
  * OATS Development Orchestrator
  *
- * Manages multiple development services and coordinates synchronization
- *
- * @module @oatsjs/core/orchestrator
+ * Manages multiple development services with cross-platform compatibility
+ * and coordinates synchronization between backend API and TypeScript client
  */
 
-import { exec } from 'child_process';
 import { EventEmitter } from 'events';
-import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { join } from 'path';
-
+import { watch } from 'chokidar';
 import chalk from 'chalk';
-import { execa } from 'execa';
 
-import detectPort from 'detect-port';
-
-import { ServiceStartError } from '../errors/index.js';
+import { ProcessManager } from '../utils/process-manager.js';
+import { PortManager } from '../utils/port-manager.js';
+import { Logger } from '../utils/logger.js';
+import { DebugManager } from '../utils/debug.js';
 
 import { DevSyncEngine } from './dev-sync-optimized.js';
+import { BaseService, ServiceState } from './services/base-service.js';
 
 import type { RuntimeConfig } from '../types/config.types.js';
 
-const execAsync = promisify(exec);
+// Service implementations
+class BackendService extends BaseService {
+  protected async waitForReady(): Promise<void> {
+    if (!this.config.port) return;
 
-export interface ServiceStatus {
-  name: string;
-  status: 'starting' | 'running' | 'error' | 'stopped';
-  process?: any;
-  port?: number;
-  startTime?: Date;
-  error?: Error;
+    const maxAttempts = 30;
+    const checkInterval = 1000;
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const isReady = await PortManager.isPortInUse(this.config.port);
+      if (isReady) {
+        this.logger.debug(`Backend service ready on port ${this.config.port}`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+    }
+
+    throw new Error(
+      `Backend service failed to start on port ${this.config.port}`
+    );
+  }
+
+  protected async checkPort(): Promise<void> {
+    if (!this.config.port) return;
+
+    const autoKill = this.config.env?.['OATS_AUTO_KILL_PORTS'] !== 'false';
+    if (autoKill) {
+      await PortManager.freePort(this.config.port, this.config.name);
+    }
+  }
 }
 
-/**
- * Development services orchestrator
- */
+class ClientService extends BaseService {
+  protected async waitForReady(): Promise<void> {
+    // Client generation is typically quick
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+}
+
+class FrontendService extends BaseService {
+  protected async waitForReady(): Promise<void> {
+    if (!this.config.port) return;
+
+    const maxAttempts = 60; // Frontend can take longer
+    const checkInterval = 1000;
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const isReady = await PortManager.isPortInUse(this.config.port);
+      if (isReady) {
+        this.logger.debug(`Frontend service ready on port ${this.config.port}`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, checkInterval));
+    }
+
+    throw new Error(
+      `Frontend service failed to start on port ${this.config.port}`
+    );
+  }
+
+  protected async checkPort(): Promise<void> {
+    if (!this.config.port) return;
+
+    const autoKill = this.config.env?.['OATS_AUTO_KILL_PORTS'] !== 'false';
+    if (autoKill) {
+      await PortManager.freePort(this.config.port, this.config.name);
+    }
+  }
+}
+
 export class DevSyncOrchestrator extends EventEmitter {
   private config: RuntimeConfig;
-  private services: Map<string, ServiceStatus> = new Map();
-  private isShuttingDown = false;
+  private logger: Logger;
+  private processManager: ProcessManager;
+  private services: Map<string, BaseService> = new Map();
   private syncEngine?: DevSyncEngine;
+  private isShuttingDown = false;
   private linkedPackages: Set<string> = new Set();
+  private configWatcher?: any;
 
   constructor(config: RuntimeConfig) {
     super();
     this.config = config;
-    this.setupSignalHandlers();
+    this.logger = new Logger('Orchestrator');
+    this.processManager = new ProcessManager();
 
-    // Initialize sync engine if client service is configured
-    if (this.config.services.client) {
-      this.syncEngine = new DevSyncEngine(config);
-      this.syncEngine.on('sync-event', (event) => {
-        console.log(chalk.blue(`🔄 Sync event: ${event.type}`));
-      });
+    // Initialize debug mode and logging
+    DebugManager.init(config.log?.level === 'debug');
 
-      // Track when packages are linked
-      this.syncEngine.on(
-        'packages-linked',
-        (packageInfo: { clientPackage: string; paths: string[] }) => {
-          this.linkedPackages.add(packageInfo.clientPackage);
-          console.log(
-            chalk.dim(`📦 Tracked linked package: ${packageInfo.clientPackage}`)
-          );
-        }
-      );
+    // Set log file if configured
+    if (config.log?.file) {
+      Logger.setLogFile(config.log.file);
     }
+
+    this.setupSignalHandlers();
+    this.createServices();
+  }
+
+  /**
+   * Create service instances
+   */
+  private createServices(): void {
+    // Backend service
+    const backendService = new BackendService(
+      {
+        name: 'backend',
+        path: this.config.resolvedPaths.backend,
+        command: this.config.services.backend.startCommand,
+        port: this.config.services.backend.port,
+        env: this.config.services.backend.env,
+      },
+      this.processManager,
+      this.config
+    );
+    this.services.set('backend', backendService);
+
+    // Client service
+    const clientService = new ClientService(
+      {
+        name: 'client',
+        path: this.config.resolvedPaths.client,
+        command:
+          this.config.services.client.generateCommand || 'npm run generate',
+        env: this.config.services.client.env || {},
+      },
+      this.processManager,
+      this.config
+    );
+    this.services.set('client', clientService);
+
+    // Frontend service (optional)
+    if (this.config.services.frontend) {
+      const frontendService = new FrontendService(
+        {
+          name: 'frontend',
+          path: this.config.resolvedPaths.frontend!,
+          command: this.config.services.frontend.startCommand,
+          port: this.config.services.frontend.port,
+          env: this.config.services.frontend.env,
+        },
+        this.processManager,
+        this.config
+      );
+      this.services.set('frontend', frontendService);
+    }
+
+    // Set up service event handlers
+    this.services.forEach((service, name) => {
+      service.on('stateChange', ({ newState }) => {
+        this.emit('serviceStateChange', { service: name, state: newState });
+      });
+    });
   }
 
   /**
    * Start all services
    */
   async start(): Promise<void> {
-    console.log(chalk.blue('🚀 Starting OATS development environment...'));
+    console.log(chalk.blue.bold('\n🚀 Starting OATS Development Sync...\n'));
 
     try {
-      // Check and handle port conflicts before starting
-      if (this.config.services.backend.port) {
-        await this.handlePortConflict(
-          'backend',
-          this.config.services.backend.port
-        );
-      }
-      if (this.config.services.frontend?.port) {
-        await this.handlePortConflict(
-          'frontend',
-          this.config.services.frontend.port
-        );
-      }
+      // Link client package first
+      await this.linkClientPackage();
 
       // Start backend service
-      await this.startService('backend', {
-        command: this.config.services.backend.startCommand,
-        cwd: this.config.resolvedPaths.backend,
-        port: this.config.services.backend.port,
-        env: this.config.services.backend.env,
-        readyPattern: this.config.services.backend.readyPattern,
-      });
+      DebugManager.section('Starting Backend Service');
+      const backendService = this.services.get('backend')!;
+      await backendService.start();
+
+      // Start client service (watch mode)
+      DebugManager.section('Starting Client Service');
+      const clientService = this.services.get('client')!;
+      await clientService.start();
 
       // Start frontend service if configured
-      if (this.config.services.frontend) {
-        await this.startService('frontend', {
-          command: this.config.services.frontend.startCommand,
-          cwd: this.config.resolvedPaths.frontend!,
-          port: this.config.services.frontend.port,
-          env: this.config.services.frontend.env,
-          readyPattern: this.config.services.frontend.readyPattern,
-        });
+      if (this.services.has('frontend')) {
+        DebugManager.section('Starting Frontend Service');
+        const frontendService = this.services.get('frontend')!;
+        await frontendService.start();
       }
 
-      console.log(chalk.green('✅ All services started successfully'));
+      // Start sync engine
+      DebugManager.section('Starting Sync Engine');
+      this.syncEngine = new DevSyncEngine(this.config);
+      this.setupSyncHandlers();
+      await this.syncEngine.start();
 
-      // Wait a bit for backend to be fully ready if using runtime spec
-      if (
-        this.syncEngine &&
-        this.config.services.backend.apiSpec.path.startsWith('/')
-      ) {
-        console.log(chalk.dim('⏳ Waiting for backend API to be ready...'));
-        await new Promise((resolve) => setTimeout(resolve, 3000)); // 3 second delay
+      // Only show success message if not in quiet mode
+      if (!this.config.log?.quiet) {
+        console.log(
+          chalk.green.bold('\n✅ All services started successfully!\n')
+        );
+        this.printServiceStatus();
       }
 
-      // Start sync engine after services are running
-      if (this.syncEngine) {
-        console.log(chalk.blue('🔄 Starting file watcher for API sync...'));
-        await this.syncEngine.start();
-      }
-
-      this.emit('ready');
+      // Watch config file for changes
+      this.watchConfigFile();
     } catch (error) {
-      console.error(chalk.red('❌ Failed to start services:'), error);
-      await this.stop();
+      console.error(chalk.red.bold('\n❌ Failed to start services\n'));
+      await this.shutdown();
       throw error;
     }
   }
 
   /**
-   * Stop all services
+   * Shutdown all services
    */
-  async stop(): Promise<void> {
+  async shutdown(): Promise<void> {
+    await this.stop();
+    process.exit(0);
+  }
+
+  /**
+   * Stop all services without exiting the process
+   */
+  private async stop(): Promise<void> {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
 
-    console.log(chalk.yellow('🔄 Shutting down services...'));
+    if (!this.config.log?.quiet) {
+      console.log(chalk.yellow.bold('\n🛑 Shutting down services...\n'));
+    }
 
-    // Stop sync engine first if it's running
+    // Stop sync engine
     if (this.syncEngine) {
-      await this.syncEngine.stop();
+      this.syncEngine.stop();
+      this.syncEngine = undefined;
     }
 
-    // Unlink packages before stopping services
-    if (this.linkedPackages.size > 0) {
-      await this.unlinkPackages();
-    }
-
-    const stopPromises: Promise<void>[] = [];
-
-    for (const [name, status] of this.services) {
-      if (status.process && !status.process.killed) {
-        stopPromises.push(this.stopService(name));
-      }
-    }
-
+    // Stop all services
+    const stopPromises = Array.from(this.services.values()).map((service) =>
+      service
+        .stop()
+        .catch((err) =>
+          this.logger.error(`Failed to stop ${service.getInfo().name}:`, err)
+        )
+    );
     await Promise.all(stopPromises);
-    console.log(chalk.green('✅ All services stopped'));
-    this.emit('stopped');
-  }
 
-  /**
-   * Get status of all services
-   */
-  getStatus(): ServiceStatus[] {
-    return Array.from(this.services.values());
-  }
+    // Kill any remaining processes
+    await this.processManager.killAll();
 
-  /**
-   * Start a specific service
-   */
-  private async startService(
-    name: string,
-    options: {
-      command: string;
-      cwd: string;
-      port?: number;
-      env?: Record<string, string>;
-      readyPattern?: string;
-    }
-  ): Promise<void> {
-    console.log(chalk.blue(`📦 Starting ${name} service...`));
+    // Unlink packages
+    await this.unlinkPackages();
 
-    const status: ServiceStatus = {
-      name,
-      status: 'starting',
-      port: options.port,
-      startTime: new Date(),
-    };
-
-    this.services.set(name, status);
-
-    return new Promise((resolve, reject) => {
-      console.log(chalk.dim(`Executing command: ${options.command}`));
-      console.log(chalk.dim(`Working directory: ${options.cwd}`));
-
-      const shouldShowOutput =
-        this.config.log?.showServiceOutput !== false && !this.config.log?.quiet;
-
-      const child = execa(options.command, {
-        cwd: options.cwd,
-        env: {
-          ...process.env,
-          ...options.env,
-        },
-        shell: true,
-        stdio: ['inherit', 'pipe', 'pipe'],
-        preferLocal: true,
-        localDir: options.cwd,
-      });
-
-      status.process = child;
-
-      let isReady = false;
-      const { readyPattern } = options;
-      const readyRegex = readyPattern ? new RegExp(readyPattern, 'i') : null;
-
-      // If port is specified, prioritize port-based detection
-      const usePortDetection = !!options.port;
-      const useTextDetection = !!readyPattern && !usePortDetection;
-
-      // Handle stdout
-      child.stdout?.on('data', (data: Buffer) => {
-        const output = data.toString().trim();
-        if (shouldShowOutput) {
-          console.log(chalk.gray(`[${name}]`), output);
-        }
-
-        // Only use text pattern if port detection is not available
-        if (
-          !isReady &&
-          useTextDetection &&
-          readyRegex &&
-          readyRegex.test(output)
-        ) {
-          isReady = true;
-          status.status = 'running';
-          console.log(
-            chalk.green(`✅ ${name} service is ready (text pattern matched)`)
-          );
-          resolve();
-        }
-      });
-
-      // Handle stderr
-      child.stderr?.on('data', (data: Buffer) => {
-        const output = data.toString().trim();
-
-        // Always show errors unless in quiet mode
-        if (
-          shouldShowOutput ||
-          (output.toLowerCase().includes('error') && !this.config.log?.quiet)
-        ) {
-          console.error(chalk.red(`[${name}] ERROR:`), output);
-        }
-
-        // Only use text pattern if port detection is not available
-        if (
-          !isReady &&
-          useTextDetection &&
-          readyRegex &&
-          readyRegex.test(output)
-        ) {
-          isReady = true;
-          status.status = 'running';
-          console.log(
-            chalk.green(
-              `✅ ${name} service is ready (text pattern matched from stderr)`
-            )
-          );
-          resolve();
-        }
-
-        // Store stderr for error reporting
-        if (!status.error) {
-          (status as any).stderr = output;
-        }
-      });
-
-      // Handle process exit
-      child.on('exit', (code: number | null) => {
-        if (!this.isShuttingDown) {
-          // Only treat as error if service wasn't ready and exited with non-zero code
-          if (!isReady && code !== 0) {
-            const stderr = (status as any).stderr || '';
-            const error = new ServiceStartError(
-              name,
-              `Service exited with code ${code}`,
-              code || -1,
-              stderr
-            );
-            status.status = 'error';
-            status.error = error;
-            reject(error);
-          } else if (isReady && code !== 0) {
-            // Service was running but crashed
-            const stderr = (status as any).stderr || '';
-            const error = new ServiceStartError(
-              name,
-              `Service crashed with code ${code}`,
-              code || -1,
-              stderr
-            );
-            status.status = 'error';
-            status.error = error;
-            this.emit('service-error', { name, error });
-          } else {
-            status.status = 'stopped';
-          }
-        }
-      });
-
-      child.on('error', (error: Error) => {
-        const serviceError = new ServiceStartError(
-          name,
-          `Failed to start service: ${error.message}`,
-          -1
-        );
-        status.status = 'error';
-        status.error = serviceError;
-        reject(serviceError);
-      });
-
-      // If port is specified, prioritize port-based detection
-      let portCheckInterval: NodeJS.Timeout | undefined;
-      if (usePortDetection && options.port) {
-        console.log(
-          chalk.dim(
-            `Using port-based detection for ${name} on port ${options.port}`
-          )
-        );
-
-        portCheckInterval = setInterval(async () => {
-          try {
-            const isPortInUse = await this.isPortInUse(options.port!);
-            if (isPortInUse && !isReady) {
-              // Port is now in use, service is ready
-              if (portCheckInterval) {
-                clearInterval(portCheckInterval);
-                portCheckInterval = undefined;
-              }
-              isReady = true;
-              status.status = 'running';
-              console.log(
-                chalk.green(
-                  `✅ ${name} service is ready (port ${options.port} is now in use)`
-                )
-              );
-              resolve();
-            }
-          } catch (err) {
-            // Ignore errors during port checking
-          }
-        }, 500); // Check every 500ms for faster detection
-
-        // Clean up interval on timeout
-        setTimeout(() => {
-          if (portCheckInterval) {
-            clearInterval(portCheckInterval);
-            portCheckInterval = undefined;
-          }
-        }, 29000);
-      }
-
-      // Timeout for service startup
-      setTimeout(() => {
-        if (!isReady) {
-          const error = new ServiceStartError(
-            name,
-            'Service failed to start within timeout',
-            -1
-          );
-          status.status = 'error';
-          status.error = error;
-          reject(error);
-        }
-      }, 30000); // 30 second timeout
-    });
-  }
-
-  /**
-   * Stop a specific service
-   */
-  private async stopService(name: string): Promise<void> {
-    const status = this.services.get(name);
-    if (!status?.process) return;
-
-    return new Promise<void>((resolve) => {
-      const child = status.process!;
-
-      child.on('exit', () => {
-        console.log(chalk.green(`✅ ${name} service stopped`));
-        resolve();
-      });
-
-      // Try graceful shutdown first
-      child.kill('SIGTERM');
-
-      // Force kill after 5 seconds
-      setTimeout(() => {
-        if (!child.killed) {
-          child.kill('SIGKILL');
-          resolve();
-        }
-      }, 5000);
-    });
-  }
-
-  /**
-   * Check if a port is in use
-   */
-  private async isPortInUse(port: number): Promise<boolean> {
-    // First try direct OS-level check for more reliable results
-    try {
-      if (process.platform === 'darwin' || process.platform === 'linux') {
-        const { stdout } = await execAsync(`lsof -i :${port} -t 2>/dev/null`);
-        const inUse = stdout.trim() !== '';
-        if (this.config.log?.level === 'debug') {
-          console.log(chalk.dim(`Port ${port}: ${inUse ? 'IN USE' : 'FREE'}`));
-        }
-        return inUse;
-      } else if (process.platform === 'win32') {
-        const { stdout } = await execAsync(`netstat -an | findstr :${port}`);
-        const inUse = stdout.includes('LISTENING');
-        if (this.config.log?.level === 'debug') {
-          console.log(chalk.dim(`Port ${port}: ${inUse ? 'IN USE' : 'FREE'}`));
-        }
-        return inUse;
-      }
-    } catch (error) {
-      // If OS-level check fails, try detectPort as fallback
-      try {
-        const availablePort = await detectPort(port);
-        const inUse = availablePort !== port;
-        return inUse;
-      } catch (detectError) {
-        // Both methods failed, assume port is free
-        return false;
-      }
+    // Stop config watcher
+    if (this.configWatcher) {
+      await this.configWatcher.close();
+      this.configWatcher = undefined;
     }
 
-    // Default fallback
-    return false;
+    if (!this.config.log?.quiet) {
+      console.log(chalk.green.bold('\n✅ Shutdown complete\n'));
+    }
+
+    // Reset shutdown flag for potential restart
+    this.isShuttingDown = false;
   }
 
   /**
-   * Handle port conflicts by killing existing process if needed
+   * Link client package to frontend
    */
-  private async handlePortConflict(
-    serviceName: string,
-    port: number
-  ): Promise<void> {
-    const isInUse = await this.isPortInUse(port);
+  private async linkClientPackage(): Promise<void> {
+    if (!this.config.services.frontend) return;
 
-    if (isInUse) {
-      console.log(
-        chalk.yellow(`⚠️  Port ${port} is already in use for ${serviceName}`)
-      );
+    const clientPath = this.config.resolvedPaths.client;
+    const clientName = this.config.services.client.packageName;
+    const frontendPath = this.config.resolvedPaths.frontend!;
 
-      // Check if we should auto-kill processes (default: true for better DX)
-      const autoKill = this.config.sync?.autoKillConflictingPorts !== false;
+    const pm = this.detectPackageManager(frontendPath);
 
-      if (!autoKill) {
-        throw new ServiceStartError(
-          serviceName,
-          `Port ${port} is already in use. Please free the port manually or set sync.autoKillConflictingPorts to true`,
-          -1
-        );
-      }
+    // Link in client directory
+    await this.runCommand(`${pm} link`, clientPath);
+    this.linkedPackages.add(clientName);
 
-      try {
-        if (process.platform === 'darwin' || process.platform === 'linux') {
-          // Get PIDs of processes using the port
-          const { stdout } = await execAsync(
-            `lsof -i :${port} -t 2>/dev/null || true`
-          );
-          const pids = stdout
-            .trim()
-            .split('\n')
-            .filter((pid) => pid && /^\d+$/.test(pid));
+    // Link to frontend
+    await this.runCommand(`${pm} link ${clientName}`, frontendPath);
 
-          if (pids.length > 0) {
-            console.log(chalk.yellow(`🔄 Attempting to free port ${port}...`));
-
-            for (const pid of pids) {
-              try {
-                await execAsync(`kill -9 ${pid}`);
-              } catch (err) {
-                // Process might have already exited
-              }
-            }
-
-            // Wait a bit for the port to be released
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-
-            // Verify port is now free
-            const stillInUse = await this.isPortInUse(port);
-            if (!stillInUse) {
-              console.log(chalk.green(`✅ Port ${port} is now free`));
-            } else {
-              throw new Error(`Failed to free port ${port}`);
-            }
-          }
-        } else if (process.platform === 'win32') {
-          // Windows: Find and kill process using the port
-          const { stdout } = await execAsync(`netstat -ano | findstr :${port}`);
-          const lines = stdout.trim().split('\n');
-          const pids = new Set<string>();
-
-          lines.forEach((line) => {
-            const parts = line.trim().split(/\s+/);
-            const pid = parts[parts.length - 1];
-            if (pid && /^\d+$/.test(pid)) {
-              pids.add(pid);
-            }
-          });
-
-          for (const pid of pids) {
-            console.log(
-              chalk.yellow(`🔪 Killing process ${pid} using port ${port}...`)
-            );
-            await execAsync(`taskkill /F /PID ${pid}`);
-          }
-
-          // Wait a bit for the port to be released
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-
-          // Verify port is now free
-          const stillInUse = await this.isPortInUse(port);
-          if (!stillInUse) {
-            console.log(chalk.green(`✅ Port ${port} is now free`));
-          } else {
-            throw new Error(`Failed to free port ${port}`);
-          }
-        }
-      } catch (error) {
-        console.error(chalk.red(`❌ Failed to handle port conflict: ${error}`));
-        throw new ServiceStartError(
-          serviceName,
-          `Port ${port} is already in use and could not be freed`,
-          -1
-        );
-      }
+    if (!this.config.log?.quiet) {
+      console.log(chalk.green(`✅ Linked ${clientName} to frontend`));
     }
   }
 
   /**
-   * Unlink packages that were linked during the session
+   * Unlink packages on shutdown
    */
   private async unlinkPackages(): Promise<void> {
-    console.log(chalk.yellow('🔗 Unlinking packages...'));
-
     for (const packageName of this.linkedPackages) {
       try {
-        // Detect package manager for unlink command
-        const packageManager = await this.detectPackageManager(
-          this.config.resolvedPaths.client
-        );
-        const unlinkCommand = `${packageManager} unlink`;
-
-        // Unlink in client directory
-        if (this.config.services.client) {
-          console.log(
-            chalk.dim(`Unlinking ${packageName} in client directory...`)
+        if (this.config.resolvedPaths.frontend) {
+          const pm = this.detectPackageManager(
+            this.config.resolvedPaths.frontend
           );
           await this.runCommand(
-            unlinkCommand,
-            this.config.resolvedPaths.client
+            `${pm} unlink ${packageName}`,
+            this.config.resolvedPaths.frontend
           );
         }
-
-        // Unlink in frontend directory if configured
-        if (this.config.services.frontend) {
-          const frontendPackageManager = await this.detectPackageManager(
-            this.config.resolvedPaths.frontend!
-          );
-          const frontendUnlinkCommand = `${frontendPackageManager} unlink ${packageName}`;
-
-          console.log(
-            chalk.dim(`Unlinking ${packageName} in frontend directory...`)
-          );
-          await this.runCommand(
-            frontendUnlinkCommand,
-            this.config.resolvedPaths.frontend!
-          );
-        }
-
-        console.log(chalk.green(`✅ Unlinked ${packageName}`));
-      } catch (error) {
-        console.warn(
-          chalk.yellow(`⚠️  Failed to unlink ${packageName}: ${error}`)
-        );
+      } catch (err) {
+        // Ignore unlink errors
       }
     }
-
     this.linkedPackages.clear();
   }
 
   /**
-   * Detect package manager in a directory
+   * Detect package manager
    */
-  private async detectPackageManager(path: string): Promise<string> {
-    if (existsSync(join(path, 'yarn.lock'))) {
-      return 'yarn';
-    }
-    if (existsSync(join(path, 'pnpm-lock.yaml'))) {
-      return 'pnpm';
-    }
-    if (existsSync(join(path, 'package-lock.json'))) {
-      return 'npm';
-    }
-    // Default to the configured package manager or npm
-    return this.config.packageManager || 'npm';
+  private detectPackageManager(projectPath: string): string {
+    if (existsSync(join(projectPath, 'yarn.lock'))) return 'yarn';
+    if (existsSync(join(projectPath, 'pnpm-lock.yaml'))) return 'pnpm';
+    return 'npm';
   }
 
   /**
-   * Run a shell command
+   * Run a command
    */
-  private async runCommand(command: string, cwd: string): Promise<void> {
-    try {
-      await execa(command, {
-        cwd,
-        shell: true,
-        stdio: this.config.log?.quiet ? 'pipe' : 'inherit',
+  private async runCommand(command: string, cwd?: string): Promise<void> {
+    const [cmd, ...args] = command.split(' ');
+    const child = this.processManager.startProcess(cmd || 'echo', args, {
+      cwd: cwd || process.cwd(),
+    });
+
+    // Wait for the command to complete
+    await new Promise<void>((resolve, reject) => {
+      child.on('exit', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Command failed with exit code ${code}`));
+        }
       });
-    } catch (error) {
-      throw new Error(`Command failed: ${command} - ${error}`);
-    }
+      child.on('error', reject);
+    });
   }
 
   /**
-   * Setup signal handlers for graceful shutdown
+   * Set up sync engine event handlers
+   */
+  private setupSyncHandlers(): void {
+    if (!this.syncEngine) return;
+
+    this.syncEngine.on('generation-completed', ({ linkedPaths }) => {
+      console.log(chalk.green('✅ Client regeneration completed'));
+      if (linkedPaths?.length) {
+        console.log(chalk.dim('Updated paths:'));
+        linkedPaths.forEach((path: string) =>
+          console.log(chalk.dim(`  - ${path}`))
+        );
+      }
+    });
+
+    this.syncEngine.on('generation-failed', ({ error }) => {
+      console.error(chalk.red('❌ Client regeneration failed:'), error);
+    });
+  }
+
+  /**
+   * Set up signal handlers
    */
   private setupSignalHandlers(): void {
     const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 
     signals.forEach((signal) => {
       process.on(signal, async () => {
-        console.log(
-          chalk.yellow(`\n🔄 Received ${signal}, shutting down gracefully...`)
-        );
-        await this.stop();
-        process.exit(0);
+        console.log(chalk.yellow(`\n📍 Received ${signal}`));
+        await this.shutdown();
       });
     });
+
+    process.on('uncaughtException', async (error) => {
+      console.error(chalk.red('\n❌ Uncaught exception:'), error);
+      await this.shutdown();
+    });
+  }
+
+  /**
+   * Watch config file for changes
+   */
+  private watchConfigFile(): void {
+    const configPath = 'oats.config.json';
+
+    this.configWatcher = watch(configPath, {
+      persistent: true,
+      ignoreInitial: true,
+    });
+
+    this.configWatcher.on('change', async () => {
+      console.log(chalk.yellow('\n🔄 Configuration changed, restarting...\n'));
+
+      try {
+        // Stop all services but don't exit the process
+        await this.stop();
+
+        // Re-read and validate the configuration
+        const { readFileSync } = await import('fs');
+        const { validateConfig, mergeWithDefaults } = await import(
+          '../config/schema.js'
+        );
+        const { dirname, resolve, join } = await import('path');
+
+        const fullPath = resolve(configPath);
+        const configContent = readFileSync(fullPath, 'utf-8');
+        const newConfig = JSON.parse(configContent);
+
+        // Validate configuration
+        const validation = validateConfig(newConfig);
+        if (!validation.valid) {
+          console.error(chalk.red('\n❌ Configuration validation failed:\n'));
+          validation.errors.forEach((error) => {
+            console.error(chalk.red(`  • ${error.path}: ${error.message}`));
+          });
+          console.log(
+            chalk.yellow('\nPlease fix these errors in the config file.')
+          );
+          return;
+        }
+
+        // Create runtime config with resolved paths
+        const runtimeConfig = mergeWithDefaults(newConfig) as any;
+        runtimeConfig.resolvedPaths = {
+          backend: resolve(
+            dirname(fullPath),
+            runtimeConfig.services.backend.path
+          ),
+          client: resolve(
+            dirname(fullPath),
+            runtimeConfig.services.client.path
+          ),
+          frontend: runtimeConfig.services.frontend
+            ? resolve(dirname(fullPath), runtimeConfig.services.frontend.path)
+            : undefined,
+          apiSpec: join(
+            resolve(dirname(fullPath), runtimeConfig.services.backend.path),
+            runtimeConfig.services.backend.apiSpec.path
+          ),
+        };
+
+        // Update the config
+        this.config = runtimeConfig;
+
+        // Recreate services with new config
+        this.services.clear();
+        this.createServices();
+
+        // Restart everything
+        await this.start();
+      } catch (error) {
+        console.error(
+          chalk.red('❌ Failed to restart after config change:'),
+          error
+        );
+        console.log(chalk.yellow('Please restart OATS manually.'));
+      }
+    });
+  }
+
+  /**
+   * Print service status
+   */
+  private printServiceStatus(): void {
+    console.log(chalk.blue('\n📊 Service Status:'));
+
+    this.services.forEach((service) => {
+      const info = service.getInfo();
+      const stateColor =
+        info.state === ServiceState.RUNNING ? 'green' : 'yellow';
+      const portInfo = info.port ? ` (port ${info.port})` : '';
+
+      console.log(
+        chalk[stateColor](`  ${info.name}: ${info.state}${portInfo}`)
+      );
+    });
+
+    console.log('');
   }
 }

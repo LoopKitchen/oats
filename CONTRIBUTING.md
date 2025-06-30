@@ -4,7 +4,7 @@ First off, thank you for considering contributing to OATSJS! It's people like yo
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by the [OATSJS Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to [opensource@oatsjs.dev](mailto:opensource@oatsjs.dev).
+This project and everyone participating in it is governed by the [OATS Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to [hari@loopkitchen.com](mailto:hari@loopkitchen.com).
 
 ## How Can I Contribute?
 
@@ -14,12 +14,12 @@ This section guides you through submitting a bug report for OATSJS. Following th
 
 **Before Submitting A Bug Report**
 
-* **Check the [documentation](https://github.com/shekhardtu/oatsjs#readme)** for a list of common questions and problems.
-* **Check the [issues](https://github.com/shekhardtu/oatsjs/issues)** to see if the problem has already been reported. If it has **and the issue is still open**, add a comment to the existing issue instead of opening a new one.
+* **Check the [documentation](https://github.com/loopkitchen/oats#readme)** for a list of common questions and problems.
+* **Check the [issues](https://github.com/loopkitchen/oats/issues)** to see if the problem has already been reported. If it has **and the issue is still open**, add a comment to the existing issue instead of opening a new one.
 
 **How Do I Submit A (Good) Bug Report?**
 
-Bugs are tracked as [GitHub issues](https://github.com/shekhardtu/oatsjs/issues). Create an issue and provide the following information:
+Bugs are tracked as [GitHub issues](https://github.com/loopkitchen/oats/issues). Create an issue and provide the following information:
 
 * **Use a clear and descriptive title** for the issue to identify the problem.
 * **Describe the exact steps which reproduce the problem** in as many details as possible.
@@ -36,12 +36,12 @@ This section guides you through submitting an enhancement suggestion for OATSJS,
 
 **Before Submitting An Enhancement Suggestion**
 
-* **Check the [documentation](https://github.com/shekhardtu/oatsjs#readme)** to see if the enhancement is already available.
-* **Check the [issues](https://github.com/shekhardtu/oatsjs/issues)** to see if the enhancement has already been suggested. If it has, add a comment to the existing issue instead of opening a new one.
+* **Check the [documentation](https://github.com/loopkitchen/oats#readme)** to see if the enhancement is already available.
+* **Check the [issues](https://github.com/loopkitchen/oats/issues)** to see if the enhancement has already been suggested. If it has, add a comment to the existing issue instead of opening a new one.
 
 **How Do I Submit A (Good) Enhancement Suggestion?**
 
-Enhancement suggestions are tracked as [GitHub issues](https://github.com/shekhardtu/oatsjs/issues). Create an issue and provide the following information:
+Enhancement suggestions are tracked as [GitHub issues](https://github.com/loopkitchen/oats/issues). Create an issue and provide the following information:
 
 * **Use a clear and descriptive title** for the issue to identify the suggestion.
 * **Provide a step-by-step description of the suggested enhancement** in as many details as possible.
@@ -77,8 +77,8 @@ Please follow these steps to have your contribution considered by the maintainer
 1. Fork the repo and create your branch from `main`.
 2. Clone your fork:
    ```bash
-   git clone https://github.com/<your-username>/oatsjs.git
-   cd oatsjs
+   git clone https://github.com/loopkitchen/oats.git
+   cd oats
    ```
 3. Install dependencies:
    ```bash
@@ -198,5 +198,5 @@ This section lists the labels we use to help us track and manage issues and pull
 * `duplicate` - This issue or pull request already exists.
 * `invalid` - This doesn't seem right.
 
-[beginner]:https://github.com/shekhardtu/oatsjs/issues?q=is%3Aissue+is%3Aopen+label%3Abeginner
-[help-wanted]:https://github.com/shekhardtu/oatsjs/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22
+[beginner]:https://github.com/loopkitchen/oats/issues?q=is%3Aissue+is%3Aopen+label%3Abeginner
+[help-wanted]:https://github.com/loopkitchen/oats/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22
