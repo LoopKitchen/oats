@@ -87,6 +87,34 @@
         "cwd": {
           "type": "string",
           "description": "Working directory for commands"
+        },
+        "runtime": {
+          "type": "string",
+          "description": "Runtime environment",
+          "enum": ["node", "python"],
+          "default": "node"
+        },
+        "python": {
+          "type": "object",
+          "description": "Python-specific configuration",
+          "properties": {
+            "virtualEnv": {
+              "type": "string",
+              "description": "Path to virtual environment directory",
+              "examples": [".venv", "venv", "env"]
+            },
+            "packageManager": {
+              "type": "string",
+              "description": "Python package manager",
+              "enum": ["pip", "poetry", "pipenv"],
+              "default": "pip"
+            },
+            "executable": {
+              "type": "string",
+              "description": "Python executable name",
+              "default": "python"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -353,8 +381,14 @@
         },
         "quiet": {
           "type": "boolean",
-          "description": "Suppress all non-error output",
-          "default": false
+          "description": "DEPRECATED: Use log level 'error' or 'warn' instead. Suppress all non-error output",
+          "default": false,
+          "deprecated": true
+        },
+        "showServiceOutput": {
+          "type": "boolean",
+          "description": "Show output from backend/frontend services",
+          "default": true
         }
       },
       "additionalProperties": false

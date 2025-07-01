@@ -13,6 +13,8 @@ export class Logger {
   private context: string;
   private static logLevel: LogLevel = LogLevel.INFO;
   private static logFile?: string;
+  private static showTimestamps: boolean = false;
+  private static useColors: boolean = true;
 
   constructor(context: string) {
     this.context = context;
@@ -20,6 +22,14 @@ export class Logger {
 
   static setLogLevel(level: LogLevel): void {
     Logger.logLevel = level;
+  }
+
+  static setShowTimestamps(show: boolean): void {
+    Logger.showTimestamps = show;
+  }
+
+  static setUseColors(use: boolean): void {
+    Logger.useColors = use;
   }
 
   static setLogFile(filePath?: string): void {
@@ -47,8 +57,16 @@ export class Logger {
   }
 
   private formatMessage(level: LogLevel, message: string): string {
-    const timestamp = new Date().toISOString();
-    return `[${timestamp}] [${level.toUpperCase()}] [${this.context}] ${message}`;
+    let formatted = '';
+
+    if (Logger.showTimestamps) {
+      const timestamp = new Date().toISOString();
+      formatted += `[${timestamp}] `;
+    }
+
+    formatted += `[${level.toUpperCase()}] [${this.context}] ${message}`;
+
+    return formatted;
   }
 
   private logToFile(level: LogLevel, message: string, ...args: any[]): void {
@@ -67,10 +85,14 @@ export class Logger {
     }
   }
 
+  private colorize(text: string, color: typeof chalk.gray): string {
+    return Logger.useColors ? color(text) : text;
+  }
+
   debug(message: string, ...args: any[]): void {
     if (this.shouldLog(LogLevel.DEBUG)) {
       console.log(
-        chalk.gray(this.formatMessage(LogLevel.DEBUG, message)),
+        this.colorize(this.formatMessage(LogLevel.DEBUG, message), chalk.gray),
         ...args
       );
     }
@@ -80,7 +102,7 @@ export class Logger {
   info(message: string, ...args: any[]): void {
     if (this.shouldLog(LogLevel.INFO)) {
       console.log(
-        chalk.blue(this.formatMessage(LogLevel.INFO, message)),
+        this.colorize(this.formatMessage(LogLevel.INFO, message), chalk.blue),
         ...args
       );
     }
@@ -90,7 +112,7 @@ export class Logger {
   warn(message: string, ...args: any[]): void {
     if (this.shouldLog(LogLevel.WARN)) {
       console.warn(
-        chalk.yellow(this.formatMessage(LogLevel.WARN, message)),
+        this.colorize(this.formatMessage(LogLevel.WARN, message), chalk.yellow),
         ...args
       );
     }
@@ -100,7 +122,7 @@ export class Logger {
   error(message: string, ...args: any[]): void {
     if (this.shouldLog(LogLevel.ERROR)) {
       console.error(
-        chalk.red(this.formatMessage(LogLevel.ERROR, message)),
+        this.colorize(this.formatMessage(LogLevel.ERROR, message), chalk.red),
         ...args
       );
     }

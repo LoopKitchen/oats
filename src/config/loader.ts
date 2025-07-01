@@ -82,31 +82,19 @@ async function loadJavaScriptConfig(configPath: string): Promise<OatsConfig> {
 /**
  * Load TypeScript configuration
  */
-async function loadTypeScriptConfig(_configPath: string): Promise<OatsConfig> {
-  // For now, provide a helpful error message about TypeScript configs
-  // In the future, we can add support for tsx/ts-node
-  throw new ConfigError(
-    `TypeScript config files require additional setup.\n\n` +
-      `Option 1: Convert to JSON format:\n` +
-      `  - Rename oats.config.ts to oats.config.json\n` +
-      `  - Remove the import and defineConfig wrapper\n` +
-      `  - Add "$schema": "node_modules/@tryloop/oats/schema/oats.schema.json"\n\n` +
-      `Option 2: Use a JavaScript file:\n` +
-      `  - Rename oats.config.ts to oats.config.js\n` +
-      `  - Change import to: const { defineConfig } = require('@tryloop/oats')\n` +
-      `  - Change export to: module.exports = defineConfig({...})\n\n` +
-      `Option 3: Install a TypeScript runner (coming soon):\n` +
-      `  - This feature will be available in a future release`
-  );
+async function loadTypeScriptConfig(configPath: string): Promise<OatsConfig> {
+  // Import the TypeScript loader
+  const { loadTypeScriptConfig: loadTsConfig } = await import('./ts-loader.js');
+  return loadTsConfig(configPath);
 }
 
 /**
  * Find config file in current directory
- * Searches for oats.config.json, oats.config.js, oats.config.ts in that order
+ * Searches for oats.config.ts, oats.config.js, oats.config.json in that order
  */
 export function findConfigFile(cwd: string = process.cwd()): string | null {
-  // Prefer JSON/JS over TS until we have proper TS support
-  const configNames = ['oats.config.json', 'oats.config.js', 'oats.config.ts'];
+  // Prefer TypeScript/JS over JSON for better type safety
+  const configNames = ['oats.config.ts', 'oats.config.js', 'oats.config.json'];
 
   for (const name of configNames) {
     const configPath = join(cwd, name);

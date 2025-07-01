@@ -107,11 +107,17 @@ export class DevSyncOrchestrator extends EventEmitter {
     this.logger = new Logger('Orchestrator');
     this.processManager = new ProcessManager();
 
-    // Initialize debug mode and logging
-    DebugManager.init(config.log?.level === 'debug');
+    // Initialize logging
+    const logLevel = config.log?.level || 'info';
+    Logger.setLogLevel(logLevel as any);
+    Logger.setShowTimestamps(config.log?.timestamps ?? false);
+    Logger.setUseColors(config.log?.colors ?? true);
 
-    // Set log file if configured
-    if (config.log?.file) {
+    // Initialize debug mode
+    DebugManager.init(logLevel === 'debug');
+
+    // Set log file if configured (only for debug level)
+    if (config.log?.file && logLevel === 'debug') {
       Logger.setLogFile(config.log.file);
     }
 
@@ -179,7 +185,9 @@ export class DevSyncOrchestrator extends EventEmitter {
    * Start all services
    */
   async start(): Promise<void> {
-    console.log(chalk.blue.bold('\n🚀 Starting OATS Development Sync...\n'));
+    this.logger.info(
+      chalk.blue.bold('\n🚀 Starting OATS Development Sync...\n')
+    );
 
     try {
       // Link client package first
@@ -208,13 +216,11 @@ export class DevSyncOrchestrator extends EventEmitter {
       this.setupSyncHandlers();
       await this.syncEngine.start();
 
-      // Only show success message if not in quiet mode
-      if (!this.config.log?.quiet) {
-        console.log(
-          chalk.green.bold('\n✅ All services started successfully!\n')
-        );
-        this.printServiceStatus();
-      }
+      // Show success message for info level and above
+      this.logger.info(
+        chalk.green.bold('\n✅ All services started successfully!\n')
+      );
+      this.printServiceStatus();
 
       // Watch config file for changes
       this.watchConfigFile();
@@ -240,9 +246,7 @@ export class DevSyncOrchestrator extends EventEmitter {
     if (this.isShuttingDown) return;
     this.isShuttingDown = true;
 
-    if (!this.config.log?.quiet) {
-      console.log(chalk.yellow.bold('\n🛑 Shutting down services...\n'));
-    }
+    this.logger.info(chalk.yellow.bold('\n🛑 Shutting down services...\n'));
 
     // Stop sync engine
     if (this.syncEngine) {
@@ -272,9 +276,7 @@ export class DevSyncOrchestrator extends EventEmitter {
       this.configWatcher = undefined;
     }
 
-    if (!this.config.log?.quiet) {
-      console.log(chalk.green.bold('\n✅ Shutdown complete\n'));
-    }
+    this.logger.info(chalk.green.bold('\n✅ Shutdown complete\n'));
 
     // Reset shutdown flag for potential restart
     this.isShuttingDown = false;
@@ -299,9 +301,7 @@ export class DevSyncOrchestrator extends EventEmitter {
     // Link to frontend
     await this.runCommand(`${pm} link ${clientName}`, frontendPath);
 
-    if (!this.config.log?.quiet) {
-      console.log(chalk.green(`✅ Linked ${clientName} to frontend`));
-    }
+    this.logger.info(chalk.green(`✅ Linked ${clientName} to frontend`));
   }
 
   /**

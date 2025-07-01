@@ -176,6 +176,7 @@ describe('Detect Command', () => {
   });
 
   describe('detectProjectStructure', () => {
+    // TODO: This test is skipped until monorepo detection is fully implemented
     it.skip('should detect monorepo structure', async () => {
       mockGlob.mockImplementation(async (pattern: string | string[]) => {
         if (

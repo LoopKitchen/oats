@@ -16,6 +16,7 @@ import debounce from 'lodash.debounce';
 
 import { ApiSpecError, GeneratorError } from '../errors/index.js';
 import { PlatformUtils } from '../utils/platform.js';
+import { Logger } from '../utils/logger.js';
 
 import { SwaggerChangeDetector } from './swagger-diff.js';
 
@@ -48,11 +49,13 @@ export class DevSyncEngine extends EventEmitter {
   private readonly MAX_SYNC_RETRIES = 3;
   private pollingInterval?: NodeJS.Timeout;
   private lastGeneratedSpecHash?: string;
+  private logger: Logger;
 
   constructor(config: RuntimeConfig) {
     super();
     this.config = config;
     this.changeDetector = new SwaggerChangeDetector();
+    this.logger = new Logger('DevSyncEngine');
 
     // Setup debounced sync function with platform-specific timing
     const debounceMs =
@@ -73,13 +76,15 @@ export class DevSyncEngine extends EventEmitter {
     if (isRuntimeSpec) {
       // For runtime specs, use polling instead of file watching
       if (!this.config.log?.quiet) {
-        console.log(chalk.blue('👁️  Starting OpenAPI spec polling...'));
+        this.logger.info(chalk.blue('👁️  Starting OpenAPI spec polling...'));
       }
 
       const pollIntervalMs = this.config.sync.pollingInterval || 5000; // Default 5 seconds
 
       if (!this.config.log?.quiet) {
-        console.log(chalk.dim(`📊 Polling interval: ${pollIntervalMs}ms`));
+        this.logger.debug(
+          chalk.dim(`📊 Polling interval: ${pollIntervalMs}ms`)
+        );
       }
 
       // Start polling
@@ -90,19 +95,19 @@ export class DevSyncEngine extends EventEmitter {
       this.isRunning = true;
 
       if (!this.config.log?.quiet) {
-        console.log(chalk.green('✅ OpenAPI spec polling started'));
+        this.logger.info(chalk.green('✅ OpenAPI spec polling started'));
       }
     } else {
       // For static specs, use file watching
       if (!this.config.log?.quiet) {
-        console.log(chalk.blue('👁️  Starting file watcher...'));
+        this.logger.info(chalk.blue('👁️  Starting file watcher...'));
       }
 
       try {
         const watchPaths = this.getWatchPaths();
 
         if (!this.config.log?.quiet) {
-          console.log(chalk.dim('📂 Watching paths:'), watchPaths);
+          this.logger.debug(chalk.dim('📂 Watching paths:'), watchPaths);
         }
 
         const ignored = this.config.sync.ignore || [
@@ -125,16 +130,20 @@ export class DevSyncEngine extends EventEmitter {
         this.watcher.on('error', this.handleWatchError.bind(this));
 
         this.isRunning = true;
-        console.log(chalk.green('✅ File watcher started'));
+        if (!this.config.log?.quiet) {
+          this.logger.info(chalk.green('✅ File watcher started'));
+        }
       } catch (error) {
-        console.error(chalk.red('❌ Failed to start file watcher:'), error);
+        this.logger.error(chalk.red('❌ Failed to start file watcher:'), error);
         throw error;
       }
     }
 
     // Run initial sync if configured
     if (this.config.sync.runInitialGeneration) {
-      console.log(chalk.blue('🔄 Running initial sync...'));
+      if (!this.config.log?.quiet) {
+        this.logger.info(chalk.blue('🔄 Running initial sync...'));
+      }
       await this.performSync();
     }
 
@@ -147,7 +156,9 @@ export class DevSyncEngine extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.isRunning) return;
 
-    console.log(chalk.yellow('🔄 Stopping sync engine...'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.yellow('🔄 Stopping sync engine...'));
+    }
 
     if (this.watcher) {
       await this.watcher.close();
@@ -160,7 +171,9 @@ export class DevSyncEngine extends EventEmitter {
     }
 
     this.isRunning = false;
-    console.log(chalk.green('✅ Sync engine stopped'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.green('✅ Sync engine stopped'));
+    }
     this.emit('stopped');
   }
 
@@ -183,19 +196,22 @@ export class DevSyncEngine extends EventEmitter {
    * Handle file change events
    */
   private handleFileChange(filePath: string): void {
-    console.log(chalk.gray(`📝 File changed: ${filePath}`));
+    this.logger.debug(chalk.gray(`📝 File changed: ${filePath}`));
 
     // Check if this is an API spec file or related file
     const isRelevant = this.isRelevantFile(filePath);
-    console.log(chalk.dim(`   Is relevant: ${isRelevant}`));
+    this.logger.debug(chalk.dim(`   Is relevant: ${isRelevant}`));
 
     if (isRelevant) {
-      console.log(
-        chalk.blue('🔄 API-related file changed, scheduling sync...')
+      const changeDetectedTime = new Date().toISOString();
+      this.logger.info(
+        chalk.blue(
+          `🔄 API-related file changed at ${changeDetectedTime}, scheduling sync...`
+        )
       );
       this.debouncedSync();
     } else {
-      console.log(chalk.dim('   Ignoring non-relevant file'));
+      this.logger.debug(chalk.dim('   Ignoring non-relevant file'));
     }
   }
 
@@ -203,7 +219,7 @@ export class DevSyncEngine extends EventEmitter {
    * Handle watch errors
    */
   private handleWatchError(error: Error): void {
-    console.error(chalk.red('👁️  File watcher error:'), error);
+    this.logger.error(chalk.red('👁️  File watcher error:'), error);
     this.emit('error', error);
   }
 
@@ -213,7 +229,9 @@ export class DevSyncEngine extends EventEmitter {
   private async performSync(): Promise<void> {
     // Prevent concurrent sync operations
     if (this.syncLock) {
-      console.log(chalk.yellow('⏳ Sync already in progress, skipping...'));
+      this.logger.debug(
+        chalk.yellow('⏳ Sync already in progress, skipping...')
+      );
       return;
     }
 
@@ -228,19 +246,23 @@ export class DevSyncEngine extends EventEmitter {
       };
       this.emit('sync-event', event);
 
-      console.log(chalk.blue('🔄 Synchronizing API changes...'));
+      this.logger.info(
+        chalk.blue(
+          `🔄 Starting synchronization at ${new Date().toISOString()}...`
+        )
+      );
 
       // Check if API spec has meaningful changes
       const checkStartTime = Date.now();
       const hasChanges = await this.checkForMeaningfulChanges();
       if (showDurations) {
-        console.log(
+        this.logger.debug(
           chalk.dim(`  ⏱️  Change detection: ${Date.now() - checkStartTime}ms`)
         );
       }
 
       if (!hasChanges && this.config.sync.strategy === 'smart') {
-        console.log(chalk.gray('📊 No meaningful API changes detected'));
+        this.logger.debug(chalk.gray('📊 No meaningful API changes detected'));
         return;
       }
 
@@ -248,7 +270,7 @@ export class DevSyncEngine extends EventEmitter {
       const genStartTime = Date.now();
       await this.generateClient();
       if (showDurations) {
-        console.log(
+        this.logger.debug(
           chalk.dim(`  ⏱️  Client generation: ${Date.now() - genStartTime}ms`)
         );
       }
@@ -258,7 +280,7 @@ export class DevSyncEngine extends EventEmitter {
         const buildStartTime = Date.now();
         await this.buildClient();
         if (showDurations) {
-          console.log(
+          this.logger.debug(
             chalk.dim(`  ⏱️  Client build: ${Date.now() - buildStartTime}ms`)
           );
         }
@@ -269,7 +291,7 @@ export class DevSyncEngine extends EventEmitter {
         const linkStartTime = Date.now();
         await this.linkPackages();
         if (showDurations) {
-          console.log(
+          this.logger.debug(
             chalk.dim(`  ⏱️  Package linking: ${Date.now() - linkStartTime}ms`)
           );
         }
@@ -278,15 +300,19 @@ export class DevSyncEngine extends EventEmitter {
       this.lastSyncTime = new Date();
       this.syncRetries = 0; // Reset retry count on success
 
+      const totalDuration = Date.now() - syncStartTime;
+      const endTime = new Date().toISOString();
+
       if (showDurations) {
-        const totalDuration = Date.now() - syncStartTime;
-        console.log(
+        this.logger.info(
           chalk.green(
-            `✅ Synchronization completed successfully (${totalDuration}ms total)`
+            `✅ Synchronization completed at ${endTime} (${totalDuration}ms total)`
           )
         );
       } else {
-        console.log(chalk.green('✅ Synchronization completed successfully'));
+        this.logger.info(
+          chalk.green(`✅ Synchronization completed successfully at ${endTime}`)
+        );
       }
 
       const completedEvent: SyncEvent = {
@@ -295,7 +321,7 @@ export class DevSyncEngine extends EventEmitter {
       };
       this.emit('sync-event', completedEvent);
     } catch (error) {
-      console.error(chalk.red('❌ Synchronization failed:'), error);
+      this.logger.error(chalk.red('❌ Synchronization failed:'), error);
 
       const failedEvent: SyncEvent = {
         type: 'generation-failed',
@@ -308,7 +334,7 @@ export class DevSyncEngine extends EventEmitter {
       if (this.syncRetries < this.MAX_SYNC_RETRIES) {
         this.syncRetries++;
         const retryDelay = Math.pow(2, this.syncRetries) * 1000;
-        console.log(
+        this.logger.warn(
           chalk.yellow(
             `🔄 Retrying sync in ${retryDelay}ms (attempt ${this.syncRetries}/${this.MAX_SYNC_RETRIES})...`
           )
@@ -318,7 +344,7 @@ export class DevSyncEngine extends EventEmitter {
           this.performSync();
         }, retryDelay);
       } else {
-        console.error(
+        this.logger.error(
           chalk.red(
             '❌ Max sync retries exceeded. Manual intervention required.'
           )
@@ -353,7 +379,7 @@ export class DevSyncEngine extends EventEmitter {
         });
 
         if (!response.ok) {
-          console.warn(
+          this.logger.warn(
             chalk.yellow(
               `Failed to fetch spec for comparison: ${response.statusText}`
             )
@@ -374,7 +400,7 @@ export class DevSyncEngine extends EventEmitter {
 
         return hasChanges;
       } catch (error) {
-        console.warn(
+        this.logger.warn(
           chalk.yellow(`Error fetching spec for comparison: ${error}`)
         );
         // If there's an error, assume changes to be safe
@@ -404,7 +430,9 @@ export class DevSyncEngine extends EventEmitter {
    * Generate TypeScript client
    */
   private async generateClient(): Promise<void> {
-    console.log(chalk.blue('🏗️  Generating TypeScript client...'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.blue('🏗️  Generating TypeScript client...'));
+    }
     const showDurations = this.config.sync.showStepDurations ?? false;
 
     // Extract filename from apiSpec path (e.g., '/openapi.json' -> 'openapi.json')
@@ -426,7 +454,7 @@ export class DevSyncEngine extends EventEmitter {
       if (existsSync(specHashPath) && this.lastGeneratedSpecHash) {
         const savedHash = readFileSync(specHashPath, 'utf-8').trim();
         if (savedHash === this.lastGeneratedSpecHash) {
-          console.log(
+          this.logger.debug(
             chalk.gray('📊 Client already up-to-date with current spec')
           );
           return; // Skip generation entirely
@@ -448,7 +476,7 @@ export class DevSyncEngine extends EventEmitter {
       );
       const apiUrl = `http://localhost:${this.config.services.backend.port}${runtimePath}`;
 
-      console.log(chalk.dim(`Fetching OpenAPI spec from ${apiUrl}...`));
+      this.logger.debug(chalk.dim(`Fetching OpenAPI spec from ${apiUrl}...`));
 
       // Retry logic for runtime specs - backend might still be starting
       const maxRetries = 5;
@@ -473,13 +501,13 @@ export class DevSyncEngine extends EventEmitter {
           writeFileSync(clientSwaggerPath, JSON.stringify(spec, null, 2));
 
           if (showDurations) {
-            console.log(
+            this.logger.debug(
               chalk.dim(
                 `    ⏱️  Fetched OpenAPI spec: ${Date.now() - attemptStartTime}ms`
               )
             );
           } else {
-            console.log(
+            this.logger.debug(
               chalk.dim('Fetched and saved OpenAPI spec from runtime')
             );
           }
@@ -487,15 +515,17 @@ export class DevSyncEngine extends EventEmitter {
           // Success - break out of retry loop
           break;
         } catch (error) {
-          console.log(
+          this.logger.warn(
             chalk.yellow(`Attempt ${attempt}/${maxRetries} failed: ${error}`)
           );
 
           if (attempt < maxRetries) {
-            console.log(chalk.dim(`Waiting ${retryDelay}ms before retry...`));
+            this.logger.debug(
+              chalk.dim(`Waiting ${retryDelay}ms before retry...`)
+            );
             await new Promise((resolve) => setTimeout(resolve, retryDelay));
           } else {
-            console.error(
+            this.logger.error(
               chalk.red(
                 'Failed to fetch runtime OpenAPI spec after all retries:'
               ),
@@ -518,9 +548,9 @@ export class DevSyncEngine extends EventEmitter {
       try {
         const { copyFileSync } = await import('fs');
         copyFileSync(specPath, clientSwaggerPath);
-        console.log(chalk.dim('Copied swagger.json to client directory'));
+        this.logger.debug(chalk.dim('Copied swagger.json to client directory'));
       } catch (error) {
-        console.error(chalk.red('Failed to copy swagger.json:'), error);
+        this.logger.error(chalk.red('Failed to copy swagger.json:'), error);
       }
     }
 
@@ -532,13 +562,13 @@ export class DevSyncEngine extends EventEmitter {
       rmSync(srcPath, { recursive: true, force: true });
 
       if (showDurations) {
-        console.log(
+        this.logger.debug(
           chalk.dim(
             `    ⏱️  Cleaned generated files: ${Date.now() - cleanStartTime}ms`
           )
         );
       } else {
-        console.log(chalk.dim('Cleaned generated files'));
+        this.logger.debug(chalk.dim('Cleaned generated files'));
       }
     } catch (err) {
       // Ignore errors, src directory might not exist
@@ -566,13 +596,17 @@ export class DevSyncEngine extends EventEmitter {
     }
 
     if (showDurations) {
-      console.log(
-        chalk.green(
-          `✅ TypeScript client generated (${Date.now() - genCommandStartTime}ms)`
-        )
-      );
+      if (!this.config.log?.quiet) {
+        this.logger.info(
+          chalk.green(
+            `✅ TypeScript client generated (${Date.now() - genCommandStartTime}ms)`
+          )
+        );
+      }
     } else {
-      console.log(chalk.green('✅ TypeScript client generated'));
+      if (!this.config.log?.quiet) {
+        this.logger.info(chalk.green('✅ TypeScript client generated'));
+      }
     }
 
     // Save the spec hash after successful generation
@@ -593,7 +627,9 @@ export class DevSyncEngine extends EventEmitter {
     const { buildCommand } = this.config.services.client;
     if (!buildCommand) return;
 
-    console.log(chalk.blue('🔨 Building client package...'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.blue('🔨 Building client package...'));
+    }
 
     // Check if fast build is available and we're in development
     const packageJsonPath = join(
@@ -615,14 +651,18 @@ export class DevSyncEngine extends EventEmitter {
       ? buildCommand.replace('build', 'build:fast')
       : buildCommand;
     await this.runCommand(commandToRun, this.config.resolvedPaths.client);
-    console.log(chalk.green('✅ Client package built'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.green('✅ Client package built'));
+    }
   }
 
   /**
    * Link packages for local development
    */
   private async linkPackages(): Promise<void> {
-    console.log(chalk.blue('🔗 Linking packages...'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.blue('🔗 Linking packages...'));
+    }
 
     const { linkCommand } = this.config.services.client;
     if (linkCommand) {
@@ -661,14 +701,16 @@ export class DevSyncEngine extends EventEmitter {
             '.oats-sync'
           );
           await PlatformUtils.touchFile(touchFile);
-          console.log(chalk.dim('Triggered frontend HMR'));
+          this.logger.debug(chalk.dim('Triggered frontend HMR'));
         } catch (err) {
           // Ignore errors, this is optional
         }
       }
     }
 
-    console.log(chalk.green('✅ Packages linked'));
+    if (!this.config.log?.quiet) {
+      this.logger.info(chalk.green('✅ Packages linked'));
+    }
   }
 
   /**

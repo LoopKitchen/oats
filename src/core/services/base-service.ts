@@ -162,12 +162,13 @@ export abstract class BaseService extends EventEmitter {
       const output = data.toString();
       this.handleOutput(output);
 
-      // Only show service output if not in quiet mode and showServiceOutput is true
-      const quiet = this.runtimeConfig?.log?.quiet;
+      // Show service output based on log level and showServiceOutput setting
+      const logLevel = this.runtimeConfig?.log?.level || 'info';
       const showServiceOutput =
         this.runtimeConfig?.log?.showServiceOutput !== false;
 
-      if (!quiet && showServiceOutput) {
+      // Only show service output in debug mode or if explicitly enabled in info mode
+      if (showServiceOutput && (logLevel === 'debug' || logLevel === 'info')) {
         console.log(chalk.gray(`[${this.config.name}] ${output}`));
       }
     });
@@ -176,9 +177,10 @@ export abstract class BaseService extends EventEmitter {
       const output = data.toString();
       this.handleError(output);
 
-      // Always show errors unless in quiet mode
-      const quiet = this.runtimeConfig?.log?.quiet;
-      if (!quiet) {
+      // Show errors based on log level
+      const logLevel = this.runtimeConfig?.log?.level || 'info';
+      // Always show errors unless log level is set higher than error
+      if (logLevel !== 'none') {
         console.error(chalk.red(`[${this.config.name}] ${output}`));
       }
     });

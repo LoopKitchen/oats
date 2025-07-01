@@ -436,6 +436,7 @@ export interface LogConfig {
   showServiceOutput?: boolean;
 
   /**
+   * @deprecated Use log level 'error' or 'warn' instead
    * Quiet mode - only show essential oatsjs messages
    * @default false
    */
