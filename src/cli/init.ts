@@ -133,7 +133,12 @@ export async function init(options: InitOptions): Promise<void> {
   // Write configuration
   const writeSpinner = ora('Writing configuration...').start();
   try {
-    const configContent = JSON.stringify(config, null, 2);
+    // Add $schema property for IntelliSense
+    const configWithSchema = {
+      $schema: 'node_modules/@tryloop/oats/schema/oats.schema.json',
+      ...config,
+    };
+    const configContent = JSON.stringify(configWithSchema, null, 2);
     writeFileSync(configPath, configContent);
     writeSpinner.succeed('Configuration created!');
 

@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/loopkitchen/oats/main/schema/oats.schema.json",
+  "$id": "https://raw.githubusercontent.com/tryloop/oats/main/schema/oats.schema.json",
   "title": "OATS Configuration Schema",
   "description": "Schema for oats.config.json - OpenAPI TypeScript Sync configuration",
   "type": "object",
@@ -98,9 +98,9 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "Path to OpenAPI/Swagger spec file (relative to backend)",
+          "description": "Path to OpenAPI/Swagger spec file (relative to backend) or runtime endpoint path (e.g., '/openapi.json' for FastAPI)",
           "minLength": 1,
-          "examples": ["src/swagger.json", "docs/openapi.yaml"]
+          "examples": ["src/swagger.json", "docs/openapi.yaml", "/openapi.json", "runtime:/docs/openapi.json"]
         },
         "format": {
           "type": "string",
@@ -122,7 +122,7 @@
     "clientService": {
       "type": "object",
       "description": "TypeScript client configuration",
-      "required": ["path", "packageName", "generator"],
+      "required": ["path", "packageName"],
       "properties": {
         "path": {
           "type": "string",
@@ -196,6 +196,13 @@
           "type": "boolean",
           "description": "Auto-install dependencies after generation",
           "default": false
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variables for client generation/build",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -294,6 +301,18 @@
           "description": "Run generation on startup",
           "default": false
         },
+        "pollingInterval": {
+          "type": "integer",
+          "description": "Milliseconds between polling checks for runtime API specs",
+          "minimum": 1000,
+          "maximum": 60000,
+          "default": 5000
+        },
+        "showStepDurations": {
+          "type": "boolean",
+          "description": "Show timing information for each sync step",
+          "default": false
+        },
         "ignore": {
           "type": "array",
           "description": "File patterns to ignore",
@@ -327,7 +346,12 @@
         },
         "file": {
           "type": "string",
-          "description": "Log file path"
+          "description": "Log file path (only logs when level is 'debug')"
+        },
+        "quiet": {
+          "type": "boolean",
+          "description": "Suppress all non-error output",
+          "default": false
         }
       },
       "additionalProperties": false

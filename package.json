@@ -1,6 +1,6 @@
 {
   "name": "@tryloop/oats",
-  "version": "2.2.7",
+  "version": "2.2.10",
   "description": "🌾 OATS - OpenAPI TypeScript Sync. The missing link between your OpenAPI specs and TypeScript applications. Automatically watch, generate, and sync TypeScript clients from your API definitions.",
   "keywords": [
     "oats",
