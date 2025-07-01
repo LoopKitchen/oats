@@ -65,6 +65,9 @@ export {
   mergeWithDefaults,
 } from './config/schema.js';
 
+// Config definition helper
+export { defineConfig } from './config.js';
+
 // Version export
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';

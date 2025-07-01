@@ -45,7 +45,7 @@ const logo = chalk.yellow(`
 
 // Configure the main program
 program
-  .name('oatsjs')
+  .name('oats')
   .description(packageJson.description)
   .version(packageJson.version)
   .addHelpText('before', logo)
@@ -77,11 +77,7 @@ program
   .command('start')
   .alias('watch')
   .description('Start OATS orchestrator and watch for changes')
-  .option(
-    '-c, --config <path>',
-    'path to configuration file',
-    'oats.config.json'
-  )
+  .option('-c, --config <path>', 'path to configuration file')
   .option('--init-gen', 'run initial client generation on startup')
   .option('-v, --verbose', 'verbose output')
   .option('--no-notify', 'disable desktop notifications')
@@ -111,13 +107,9 @@ program
   .command('generate')
   .alias('gen')
   .description('Generate TypeScript client from OpenAPI spec (one-time)')
-  .option(
-    '-c, --config <path>',
-    'path to configuration file',
-    'oats.config.json'
-  )
+  .option('-c, --config <path>', 'path to configuration file')
   .option('-w, --watch', 'continue watching after generation')
-  .action(async (options: { config: string; watch?: boolean }) => {
+  .action(async (options: { config?: string; watch?: boolean }) => {
     try {
       // For now, use start with a flag - will implement separate generate action
       await start({ ...options, oneTime: true });
@@ -157,13 +149,9 @@ program
   .command('validate')
   .alias('check')
   .description('Validate OATS configuration file')
-  .option(
-    '-c, --config <path>',
-    'path to configuration file',
-    'oats.config.json'
-  )
+  .option('-c, --config <path>', 'path to configuration file')
   .option('-s, --strict', 'enable strict validation')
-  .action(async (options: { config: string; strict?: boolean }) => {
+  .action(async (options: { config?: string; strict?: boolean }) => {
     try {
       await validate(options);
     } catch (error) {
@@ -183,31 +171,29 @@ program
     console.log(chalk.bold('\n🌾 OATS Examples\n'));
 
     console.log(chalk.cyan('Basic usage:'));
-    console.log('  $ oatsjs init                  # Initialize configuration');
+    console.log('  $ oats init                  # Initialize configuration');
     console.log(
-      '  $ oatsjs start                 # Start watching and syncing\n'
+      '  $ oats start                 # Start watching and syncing\n'
     );
 
     console.log(chalk.cyan('Watch with custom config:'));
-    console.log('  $ oatsjs watch --config my-config.json\n');
+    console.log('  $ oats watch --config my-config.json\n');
 
     console.log(chalk.cyan('Auto-detect setup:'));
-    console.log('  $ oatsjs detect                # Detect project structure');
+    console.log('  $ oats detect                # Detect project structure');
     console.log(
-      '  $ oatsjs start                 # Start with detected config\n'
+      '  $ oats start                 # Start with detected config\n'
     );
 
     console.log(chalk.cyan('One-time generation:'));
-    console.log('  $ oatsjs generate              # Generate once and exit\n');
+    console.log('  $ oats generate              # Generate once and exit\n');
 
     console.log(chalk.cyan('Initial generation on startup:'));
-    console.log(
-      '  $ oatsjs start --init-gen      # Generate before watching\n'
-    );
+    console.log('  $ oats start --init-gen      # Generate before watching\n');
 
     console.log(chalk.cyan('Validate configuration:'));
-    console.log('  $ oatsjs validate              # Check if config is valid');
-    console.log('  $ oatsjs validate --strict     # Strict validation\n');
+    console.log('  $ oats validate              # Check if config is valid');
+    console.log('  $ oats validate --strict     # Strict validation\n');
 
     console.log(chalk.dim('For more information, visit:'));
     console.log(chalk.dim('https://github.com/shekhardtu/oatsjs'));
@@ -225,7 +211,7 @@ program
 // Handle unknown commands
 program.on('command:*', (operands) => {
   console.error(chalk.red(`Error: unknown command '${operands[0]}'`));
-  console.log(chalk.dim('\nRun oatsjs --help to see available commands'));
+  console.log(chalk.dim('\nRun oats --help to see available commands'));
   process.exit(1);
 });
 

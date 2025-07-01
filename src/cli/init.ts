@@ -152,11 +152,21 @@ export async function init(options: InitOptions): Promise<void> {
     console.log(chalk.cyan('  1. Review your configuration:'));
     console.log(chalk.dim(`     cat ${configPath}`));
     console.log(chalk.cyan('  2. Start watching and syncing:'));
-    console.log(chalk.dim('     oatsjs start'));
+    console.log(chalk.dim('     oats start'));
     console.log(chalk.cyan('  3. Or run with initial generation:'));
-    console.log(chalk.dim('     oatsjs start --init-gen'));
+    console.log(chalk.dim('     oats start --init-gen'));
 
-    console.log(`\n${chalk.dim('For more help: oatsjs --help')}`);
+    console.log(`\n${chalk.dim('For more help: oats --help')}`);
+    console.log(
+      chalk.dim(
+        '\nTip: For better IntelliSense, you can also use TypeScript config:'
+      )
+    );
+    console.log(
+      chalk.dim(
+        '     Create oats.config.ts and import { defineConfig } from "@tryloop/oats"'
+      )
+    );
   } catch (error) {
     writeSpinner.fail('Failed to create configuration');
     console.error(

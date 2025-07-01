@@ -7,17 +7,17 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { join, resolve, basename } from 'path';
 
 import chalk from 'chalk';
 
 import { validateConfig } from '../config/schema.js';
-import { ConfigError } from '../errors/index.js';
+import { loadConfigFromFile, findConfigFile } from '../config/loader.js';
 
 import type { OatsConfig } from '../types/config.types.js';
 
 interface ValidateOptions {
-  config: string;
+  config?: string;
   strict?: boolean;
 }
 
@@ -33,31 +33,34 @@ interface PathCheck {
  * Validate OATS configuration
  */
 export async function validate(options: ValidateOptions): Promise<void> {
-  const configPath = options.config || 'oats.config.json';
-  const fullPath = join(process.cwd(), configPath);
+  let configPath: string;
+  let fullPath: string;
+
+  if (options.config) {
+    configPath = options.config;
+    fullPath = join(process.cwd(), configPath);
+  } else {
+    const foundPath = findConfigFile();
+    if (!foundPath) {
+      console.error(chalk.red('\n❌ No configuration file found'));
+      process.exit(1);
+    }
+    fullPath = foundPath;
+    configPath = basename(foundPath);
+  }
 
   console.log(chalk.yellow(`\n🔍 Validating ${configPath}...\n`));
 
   // Check if config file exists
   if (!existsSync(fullPath)) {
     console.error(chalk.red(`❌ Configuration file not found: ${configPath}`));
-    console.log(chalk.dim('\nCreate a configuration with: oatsjs init'));
+    console.log(chalk.dim('\nCreate a configuration with: oats init'));
     process.exit(1);
   }
 
   try {
-    // Read configuration file
-    const configContent = readFileSync(fullPath, 'utf8');
-    let config: OatsConfig;
-
-    // Parse JSON
-    try {
-      config = JSON.parse(configContent) as OatsConfig;
-    } catch (error) {
-      throw new ConfigError(
-        `Invalid JSON syntax: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+    // Load configuration (supports both .json and .ts)
+    const config = await loadConfigFromFile(fullPath);
 
     // Validate configuration schema
     const validation = validateConfig(config);
@@ -126,7 +129,7 @@ export async function validate(options: ValidateOptions): Promise<void> {
       console.log(chalk.yellow('\n⚠️  Validation completed with warnings'));
     } else {
       console.log(chalk.green('\n✅ Configuration is fully valid!'));
-      console.log(chalk.dim('\nYou can now run: oatsjs start'));
+      console.log(chalk.dim('\nYou can now run: oats start'));
     }
   } catch (error) {
     console.error(chalk.red('❌ Failed to validate configuration:'));

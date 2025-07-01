@@ -48,6 +48,9 @@ const SYNC_STRATEGIES: SyncStrategy[] = ['smart', 'aggressive', 'conservative'];
  * Joi schema for OATS configuration
  */
 export const configSchema = Joi.object<OatsConfig>({
+  $schema: Joi.string()
+    .optional()
+    .description('JSON Schema reference for IntelliSense'),
   version: Joi.string().optional().default('1.0.0'),
 
   services: Joi.object({

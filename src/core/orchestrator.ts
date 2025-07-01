@@ -401,33 +401,46 @@ export class DevSyncOrchestrator extends EventEmitter {
    * Watch config file for changes
    */
   private watchConfigFile(): void {
-    const configPath = 'oats.config.json';
+    // Watch all possible config files
+    const configPatterns = [
+      'oats.config.json',
+      'oats.config.js',
+      'oats.config.ts',
+    ];
 
-    this.configWatcher = watch(configPath, {
+    this.configWatcher = watch(configPatterns, {
       persistent: true,
       ignoreInitial: true,
     });
 
-    this.configWatcher.on('change', async () => {
+    this.configWatcher.on('change', async (_changedPath: string) => {
       console.log(chalk.yellow('\n🔄 Configuration changed, restarting...\n'));
 
       try {
         // Stop all services but don't exit the process
         await this.stop();
 
-        // Re-read and validate the configuration
-        const { readFileSync } = await import('fs');
+        // Re-read and validate the configuration using the config loader
+        const { loadConfigFromFile, findConfigFile } = await import(
+          '../config/loader.js'
+        );
         const { validateConfig, mergeWithDefaults } = await import(
           '../config/schema.js'
         );
         const { dirname, resolve, join } = await import('path');
 
-        const fullPath = resolve(configPath);
-        const configContent = readFileSync(fullPath, 'utf-8');
-        const newConfig = JSON.parse(configContent);
+        // Find the config file (it might be a different one than originally loaded)
+        const configPath = findConfigFile();
+        if (!configPath) {
+          console.error(chalk.red('❌ Could not find configuration file'));
+          return;
+        }
+
+        // Load the new configuration
+        const loadedConfig = await loadConfigFromFile(configPath);
 
         // Validate configuration
-        const validation = validateConfig(newConfig);
+        const validation = validateConfig(loadedConfig);
         if (!validation.valid) {
           console.error(chalk.red('\n❌ Configuration validation failed:\n'));
           validation.errors.forEach((error) => {
@@ -439,24 +452,34 @@ export class DevSyncOrchestrator extends EventEmitter {
           return;
         }
 
+        // Merge with defaults
+        const newConfig = mergeWithDefaults(loadedConfig);
+
         // Create runtime config with resolved paths
-        const runtimeConfig = mergeWithDefaults(newConfig) as any;
+        const runtimeConfig = newConfig as any;
         runtimeConfig.resolvedPaths = {
           backend: resolve(
-            dirname(fullPath),
+            dirname(configPath),
             runtimeConfig.services.backend.path
           ),
           client: resolve(
-            dirname(fullPath),
+            dirname(configPath),
             runtimeConfig.services.client.path
           ),
           frontend: runtimeConfig.services.frontend
-            ? resolve(dirname(fullPath), runtimeConfig.services.frontend.path)
+            ? resolve(dirname(configPath), runtimeConfig.services.frontend.path)
             : undefined,
-          apiSpec: join(
-            resolve(dirname(fullPath), runtimeConfig.services.backend.path),
-            runtimeConfig.services.backend.apiSpec.path
-          ),
+          apiSpec: runtimeConfig.services.backend.apiSpec.path.startsWith(
+            'runtime:'
+          )
+            ? runtimeConfig.services.backend.apiSpec.path
+            : join(
+                resolve(
+                  dirname(configPath),
+                  runtimeConfig.services.backend.path
+                ),
+                runtimeConfig.services.backend.apiSpec.path
+              ),
         };
 
         // Update the config

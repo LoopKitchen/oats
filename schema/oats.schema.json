@@ -209,12 +209,14 @@
     },
     "frontendService": {
       "type": "object",
+      "title": "Frontend Service",
       "description": "Frontend service configuration (optional)",
       "required": ["path", "startCommand"],
       "properties": {
         "path": {
           "type": "string",
           "description": "Path to frontend directory",
+          "markdownDescription": "**Required** - Path to frontend directory relative to config file",
           "minLength": 1
         },
         "port": {
@@ -227,6 +229,7 @@
         "startCommand": {
           "type": "string",
           "description": "Command to start frontend",
+          "markdownDescription": "**Required** - Command to start the frontend development server",
           "minLength": 1,
           "examples": ["npm start", "yarn dev", "ng serve"]
         },
@@ -238,18 +241,18 @@
         },
         "framework": {
           "type": "string",
-          "description": "Frontend framework",
+          "description": "Frontend framework (auto-detected if not specified)",
           "enum": ["react", "vue", "angular", "svelte", "next", "nuxt", "auto-detect"],
           "default": "auto-detect"
         },
         "readyPattern": {
           "type": "string",
-          "description": "Pattern to detect when frontend is ready",
+          "description": "Console output pattern to detect when frontend is ready",
           "default": "compiled successfully"
         },
         "env": {
           "type": "object",
-          "description": "Environment variables",
+          "description": "Environment variables to set when starting the frontend",
           "additionalProperties": {
             "type": "string"
           }

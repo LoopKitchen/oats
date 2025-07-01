@@ -6,19 +6,18 @@
  * @module @oatsjs/cli/start
  */
 
-import { existsSync, readFileSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { existsSync } from 'fs';
+import { join, dirname, resolve, basename } from 'path';
 
 import chalk from 'chalk';
 
 import { validateConfig, mergeWithDefaults } from '../config/schema.js';
+import { loadConfigFromFile, findConfigFile } from '../config/loader.js';
 import { DevSyncOrchestrator } from '../core/orchestrator.js';
 import { ConfigError, FileSystemError } from '../errors/index.js';
 
-import type { OatsConfig } from '../types/config.types.js';
-
 interface StartOptions {
-  config: string;
+  config?: string;
   initGen?: boolean;
   verbose?: boolean;
   notify?: boolean;
@@ -30,25 +29,37 @@ interface StartOptions {
  * Start OATS orchestrator
  */
 export async function start(options: StartOptions): Promise<void> {
-  const configPath = options.config || 'oats.config.json';
-  const fullPath = join(process.cwd(), configPath);
+  let configPath: string;
+  let fullPath: string;
 
-  // Check if config exists
-  if (!existsSync(fullPath)) {
-    console.error(
-      chalk.red(`\n❌ Configuration file not found: ${configPath}`)
-    );
-    console.log(chalk.yellow('\nTry one of these:'));
-    console.log(chalk.cyan('  1. Run "oatsjs init" to create a configuration'));
-    console.log(
-      chalk.cyan('  2. Run "oatsjs detect" to auto-detect your project')
-    );
-    console.log(
-      chalk.cyan(
-        '  3. Specify a different config: "oatsjs start -c my-config.json"\n'
-      )
-    );
-    process.exit(1);
+  if (options.config) {
+    // User specified a config file
+    configPath = options.config;
+    fullPath = join(process.cwd(), configPath);
+
+    if (!existsSync(fullPath)) {
+      console.error(
+        chalk.red(`\n❌ Configuration file not found: ${configPath}`)
+      );
+      process.exit(1);
+    }
+  } else {
+    // Try to find config file (checks for .ts first, then .json)
+    const foundPath = findConfigFile();
+    if (!foundPath) {
+      console.error(chalk.red('\n❌ No configuration file found'));
+      console.log(chalk.yellow('\nTry one of these:'));
+      console.log(chalk.cyan('  1. Run "oats init" to create a configuration'));
+      console.log(
+        chalk.cyan('  2. Run "oats detect" to auto-detect your project')
+      );
+      console.log(
+        chalk.cyan('  3. Create oats.config.ts or oats.config.json manually\n')
+      );
+      process.exit(1);
+    }
+    fullPath = foundPath;
+    configPath = basename(foundPath);
   }
 
   // Set color preference
@@ -60,16 +71,8 @@ export async function start(options: StartOptions): Promise<void> {
     // Load and validate configuration
     console.log(chalk.dim(`Loading configuration from ${configPath}...`));
 
-    const configContent = readFileSync(fullPath, 'utf-8');
-    let config: OatsConfig;
-
-    try {
-      config = JSON.parse(configContent) as OatsConfig;
-    } catch (error) {
-      throw new ConfigError(
-        `Invalid JSON in configuration file: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+    // Load config (supports both .json and .ts)
+    const config = await loadConfigFromFile(fullPath);
 
     // Validate configuration
     const validation = validateConfig(config);
@@ -140,7 +143,7 @@ export async function start(options: StartOptions): Promise<void> {
       console.error(chalk.red(String(error)));
     }
 
-    console.log(chalk.dim('\nFor more help: oatsjs --help'));
+    console.log(chalk.dim('\nFor more help: oats --help'));
     process.exit(1);
   }
 }

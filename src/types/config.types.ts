@@ -447,6 +447,12 @@ export interface LogConfig {
  */
 export interface OatsConfig {
   /**
+   * JSON Schema reference for IntelliSense support
+   * @optional
+   */
+  $schema?: string;
+
+  /**
    * Configuration schema version
    * Used for migration and compatibility
    * @default "1.0.0"

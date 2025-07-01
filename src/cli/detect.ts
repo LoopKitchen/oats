@@ -99,7 +99,7 @@ export async function detect(options: DetectOptions): Promise<void> {
     console.log(chalk.cyan('  1. Review the configuration:'));
     console.log(chalk.dim(`     cat ${outputPath}`));
     console.log(chalk.cyan('  2. Start watching:'));
-    console.log(chalk.dim('     oatsjs start'));
+    console.log(chalk.dim('     oats start'));
   } catch (error) {
     spinner.fail('Detection failed');
     console.error(
