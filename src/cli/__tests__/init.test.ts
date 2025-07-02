@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 
-import inquirer from 'inquirer';
+import * as inquirerPrompts from '@inquirer/prompts';
 import ora from 'ora';
 
 import * as detectModule from '../detect';
@@ -12,7 +12,7 @@ import { init } from '../init';
 
 // Mock modules
 jest.mock('fs');
-jest.mock('inquirer');
+jest.mock('@inquirer/prompts');
 jest.mock('ora');
 jest.mock('../detect');
 
@@ -22,7 +22,7 @@ const mockFs = {
   writeFileSync: writeFileSync as jest.MockedFunction<typeof writeFileSync>,
 };
 
-const mockInquirer = inquirer as jest.Mocked<typeof inquirer>;
+const mockInquirer = inquirerPrompts as jest.Mocked<typeof inquirerPrompts>;
 const mockOra = ora as jest.MockedFunction<typeof ora>;
 const mockDetect = detectModule as jest.Mocked<typeof detectModule>;
 
@@ -89,7 +89,9 @@ describe('Init Command', () => {
 
       await init({ yes: true });
 
-      expect(mockInquirer.prompt).not.toHaveBeenCalled();
+      expect(mockInquirer.confirm).not.toHaveBeenCalled();
+      expect(mockInquirer.input).not.toHaveBeenCalled();
+      expect(mockInquirer.select).not.toHaveBeenCalled();
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
         expect.stringContaining('oats.config.json'),
         expect.stringContaining('"path": "../backend"')

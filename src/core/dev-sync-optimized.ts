@@ -7,12 +7,13 @@
  */
 
 import { EventEmitter } from 'events';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join, basename } from 'path';
 
 import chalk from 'chalk';
 import { watch } from 'chokidar';
 import debounce from 'lodash.debounce';
+import ora from 'ora';
 
 import { ApiSpecError, GeneratorError } from '../errors/index.js';
 import { PlatformUtils } from '../utils/platform.js';
@@ -95,7 +96,7 @@ export class DevSyncEngine extends EventEmitter {
       this.isRunning = true;
 
       if (!this.config.log?.quiet) {
-        this.logger.info(chalk.green('✅ OpenAPI spec polling started'));
+        ora().succeed('OpenAPI spec polling started');
       }
     } else {
       // For static specs, use file watching
@@ -131,7 +132,7 @@ export class DevSyncEngine extends EventEmitter {
 
         this.isRunning = true;
         if (!this.config.log?.quiet) {
-          this.logger.info(chalk.green('✅ File watcher started'));
+          ora().succeed('File watcher started');
         }
       } catch (error) {
         this.logger.error(chalk.red('❌ Failed to start file watcher:'), error);
@@ -157,7 +158,7 @@ export class DevSyncEngine extends EventEmitter {
     if (!this.isRunning) return;
 
     if (!this.config.log?.quiet) {
-      this.logger.info(chalk.yellow('🔄 Stopping sync engine...'));
+      console.log(chalk.yellow('🔄 Stopping sync engine...'));
     }
 
     if (this.watcher) {
@@ -172,7 +173,7 @@ export class DevSyncEngine extends EventEmitter {
 
     this.isRunning = false;
     if (!this.config.log?.quiet) {
-      this.logger.info(chalk.green('✅ Sync engine stopped'));
+      ora().succeed('Sync engine stopped');
     }
     this.emit('stopped');
   }
@@ -203,11 +204,8 @@ export class DevSyncEngine extends EventEmitter {
     this.logger.debug(chalk.dim(`   Is relevant: ${isRelevant}`));
 
     if (isRelevant) {
-      const changeDetectedTime = new Date().toISOString();
       this.logger.info(
-        chalk.blue(
-          `🔄 API-related file changed at ${changeDetectedTime}, scheduling sync...`
-        )
+        chalk.blue('🔄 API-related file changed, scheduling sync...')
       );
       this.debouncedSync();
     } else {
@@ -246,11 +244,7 @@ export class DevSyncEngine extends EventEmitter {
       };
       this.emit('sync-event', event);
 
-      this.logger.info(
-        chalk.blue(
-          `🔄 Starting synchronization at ${new Date().toISOString()}...`
-        )
-      );
+      this.logger.info(chalk.blue('🔄 Starting synchronization...'));
 
       // Check if API spec has meaningful changes
       const checkStartTime = Date.now();
@@ -304,15 +298,9 @@ export class DevSyncEngine extends EventEmitter {
       const endTime = new Date().toISOString();
 
       if (showDurations) {
-        this.logger.info(
-          chalk.green(
-            `✅ Synchronization completed at ${endTime} (${totalDuration}ms total)`
-          )
-        );
+        ora().succeed(`Synchronization completed in ${totalDuration}ms total`);
       } else {
-        this.logger.info(
-          chalk.green(`✅ Synchronization completed successfully at ${endTime}`)
-        );
+        ora().succeed(`Synchronization completed successfully at ${endTime}`);
       }
 
       const completedEvent: SyncEvent = {
@@ -430,193 +418,197 @@ export class DevSyncEngine extends EventEmitter {
    * Generate TypeScript client
    */
   private async generateClient(): Promise<void> {
-    if (!this.config.log?.quiet) {
-      this.logger.info(chalk.blue('🏗️  Generating TypeScript client...'));
-    }
+    const spinner = ora('Generating TypeScript client...').start();
     const showDurations = this.config.sync.showStepDurations ?? false;
 
-    // Extract filename from apiSpec path (e.g., '/openapi.json' -> 'openapi.json')
-    const specFilename =
-      basename(this.config.services.backend.apiSpec.path) || 'openapi.json';
-
-    const clientSwaggerPath = join(
-      this.config.resolvedPaths.client,
-      specFilename
-    );
-
-    // Check if we can skip generation based on spec hash
-    const specHashPath = join(
-      this.config.resolvedPaths.client,
-      '.openapi-hash'
-    );
-
     try {
-      if (existsSync(specHashPath) && this.lastGeneratedSpecHash) {
-        const savedHash = readFileSync(specHashPath, 'utf-8').trim();
-        if (savedHash === this.lastGeneratedSpecHash) {
-          this.logger.debug(
-            chalk.gray('📊 Client already up-to-date with current spec')
-          );
-          return; // Skip generation entirely
-        }
-      }
-    } catch (err) {
-      // Continue with generation
-    }
+      // Extract filename from apiSpec path (e.g., '/openapi.json' -> 'openapi.json')
+      const specFilename =
+        basename(this.config.services.backend.apiSpec.path) || 'openapi.json';
 
-    // Handle runtime API specs (e.g., FastAPI)
-    const isRuntimeSpec =
-      this.config.services.backend.apiSpec.path.startsWith('runtime:') ||
-      this.config.services.backend.apiSpec.path.startsWith('/');
-
-    if (isRuntimeSpec) {
-      const runtimePath = this.config.services.backend.apiSpec.path.replace(
-        'runtime:',
-        ''
+      const clientSwaggerPath = join(
+        this.config.resolvedPaths.client,
+        specFilename
       );
-      const apiUrl = `http://localhost:${this.config.services.backend.port}${runtimePath}`;
 
-      this.logger.debug(chalk.dim(`Fetching OpenAPI spec from ${apiUrl}...`));
-
-      // Retry logic for runtime specs - backend might still be starting
-      const maxRetries = 5;
-      const retryDelay = 3000; // 3 seconds
-
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          const attemptStartTime = Date.now();
-          const response = await fetch(apiUrl, {
-            signal: AbortSignal.timeout(10000), // 10 second timeout
-          });
-
-          if (!response.ok) {
-            throw new Error(
-              `Failed to fetch OpenAPI spec: ${response.statusText}`
-            );
-          }
-
-          const spec = await response.json();
-
-          const { writeFileSync } = await import('fs');
-          writeFileSync(clientSwaggerPath, JSON.stringify(spec, null, 2));
-
-          if (showDurations) {
-            this.logger.debug(
-              chalk.dim(
-                `    ⏱️  Fetched OpenAPI spec: ${Date.now() - attemptStartTime}ms`
-              )
-            );
-          } else {
-            this.logger.debug(
-              chalk.dim('Fetched and saved OpenAPI spec from runtime')
-            );
-          }
-
-          // Success - break out of retry loop
-          break;
-        } catch (error) {
-          this.logger.warn(
-            chalk.yellow(`Attempt ${attempt}/${maxRetries} failed: ${error}`)
-          );
-
-          if (attempt < maxRetries) {
-            this.logger.debug(
-              chalk.dim(`Waiting ${retryDelay}ms before retry...`)
-            );
-            await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          } else {
-            this.logger.error(
-              chalk.red(
-                'Failed to fetch runtime OpenAPI spec after all retries:'
-              ),
-              error
-            );
-            throw new ApiSpecError(
-              `Failed to fetch runtime API spec after ${maxRetries} attempts: ${error}`,
-              apiUrl
-            );
-          }
-        }
-      }
-    } else {
-      // Copy static swagger.json to client directory
-      const specPath = join(
-        this.config.resolvedPaths.backend,
-        this.config.services.backend.apiSpec.path
+      // Check if we can skip generation based on spec hash
+      const specHashPath = join(
+        this.config.resolvedPaths.client,
+        '.openapi-hash'
       );
 
       try {
-        const { copyFileSync } = await import('fs');
-        copyFileSync(specPath, clientSwaggerPath);
-        this.logger.debug(chalk.dim('Copied swagger.json to client directory'));
-      } catch (error) {
-        this.logger.error(chalk.red('Failed to copy swagger.json:'), error);
+        if (existsSync(specHashPath) && this.lastGeneratedSpecHash) {
+          const savedHash = readFileSync(specHashPath, 'utf-8').trim();
+          if (savedHash === this.lastGeneratedSpecHash) {
+            spinner.info('Client already up-to-date with current spec');
+            this.logger.debug(
+              chalk.gray('📊 Client already up-to-date with current spec')
+            );
+            return; // Skip generation entirely
+          }
+        }
+      } catch (err) {
+        // Continue with generation
       }
-    }
 
-    // Clean generated files before regeneration to avoid caching issues
-    try {
-      const cleanStartTime = Date.now();
-      const srcPath = join(this.config.resolvedPaths.client, 'src');
-      const { rmSync } = await import('fs');
-      rmSync(srcPath, { recursive: true, force: true });
+      // Handle runtime API specs (e.g., FastAPI)
+      const isRuntimeSpec =
+        this.config.services.backend.apiSpec.path.startsWith('runtime:') ||
+        this.config.services.backend.apiSpec.path.startsWith('/');
 
-      if (showDurations) {
-        this.logger.debug(
-          chalk.dim(
-            `    ⏱️  Cleaned generated files: ${Date.now() - cleanStartTime}ms`
-          )
+      if (isRuntimeSpec) {
+        const runtimePath = this.config.services.backend.apiSpec.path.replace(
+          'runtime:',
+          ''
+        );
+        const apiUrl = `http://localhost:${this.config.services.backend.port}${runtimePath}`;
+
+        spinner.text = `Fetching OpenAPI spec from ${apiUrl}...`;
+        this.logger.debug(chalk.dim(`Fetching OpenAPI spec from ${apiUrl}...`));
+
+        // Retry logic for runtime specs - backend might still be starting
+        const maxRetries = 5;
+        const retryDelay = 3000; // 3 seconds
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            const attemptStartTime = Date.now();
+            const response = await fetch(apiUrl, {
+              signal: AbortSignal.timeout(10000), // 10 second timeout
+            });
+
+            if (!response.ok) {
+              throw new Error(
+                `Failed to fetch OpenAPI spec: ${response.statusText}`
+              );
+            }
+
+            const spec = await response.json();
+
+            const { writeFileSync } = await import('fs');
+            writeFileSync(clientSwaggerPath, JSON.stringify(spec, null, 2));
+
+            if (showDurations) {
+              this.logger.debug(
+                chalk.dim(
+                  `    ⏱️  Fetched OpenAPI spec: ${Date.now() - attemptStartTime}ms`
+                )
+              );
+            } else {
+              this.logger.debug(
+                chalk.dim('Fetched and saved OpenAPI spec from runtime')
+              );
+            }
+
+            // Success - break out of retry loop
+            break;
+          } catch (error) {
+            this.logger.warn(
+              chalk.yellow(`Attempt ${attempt}/${maxRetries} failed: ${error}`)
+            );
+
+            if (attempt < maxRetries) {
+              this.logger.debug(
+                chalk.dim(`Waiting ${retryDelay}ms before retry...`)
+              );
+              await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            } else {
+              this.logger.error(
+                chalk.red(
+                  'Failed to fetch runtime OpenAPI spec after all retries:'
+                ),
+                error
+              );
+              throw new ApiSpecError(
+                `Failed to fetch runtime API spec after ${maxRetries} attempts: ${error}`,
+                apiUrl
+              );
+            }
+          }
+        }
+      } else {
+        // Copy static swagger.json to client directory
+        const specPath = join(
+          this.config.resolvedPaths.backend,
+          this.config.services.backend.apiSpec.path
+        );
+
+        try {
+          const { copyFileSync } = await import('fs');
+          copyFileSync(specPath, clientSwaggerPath);
+          this.logger.debug(
+            chalk.dim('Copied swagger.json to client directory')
+          );
+        } catch (error) {
+          this.logger.error(chalk.red('Failed to copy swagger.json:'), error);
+        }
+      }
+
+      // Clean generated files before regeneration to avoid caching issues
+      try {
+        const cleanStartTime = Date.now();
+        const srcPath = join(this.config.resolvedPaths.client, 'src');
+        const { rmSync } = await import('fs');
+        rmSync(srcPath, { recursive: true, force: true });
+
+        if (showDurations) {
+          this.logger.debug(
+            chalk.dim(
+              `    ⏱️  Cleaned generated files: ${Date.now() - cleanStartTime}ms`
+            )
+          );
+        } else {
+          this.logger.debug(chalk.dim('Cleaned generated files'));
+        }
+      } catch (err) {
+        // Ignore errors, src directory might not exist
+      }
+
+      // Implementation depends on generator type
+      const { generator, generateCommand } = this.config.services.client;
+      const genCommandStartTime = Date.now();
+
+      spinner.text = 'Running client generation command...';
+
+      if (generateCommand) {
+        // Use the specified generate command
+        await this.runCommand(
+          generateCommand,
+          this.config.resolvedPaths.client
+        );
+      } else if (generator === '@hey-api/openapi-ts') {
+        // Default command for @hey-api/openapi-ts
+        await this.runCommand(
+          'npx @hey-api/openapi-ts',
+          this.config.resolvedPaths.client
         );
       } else {
-        this.logger.debug(chalk.dim('Cleaned generated files'));
-      }
-    } catch (err) {
-      // Ignore errors, src directory might not exist
-    }
-
-    // Implementation depends on generator type
-    const { generator, generateCommand } = this.config.services.client;
-    const genCommandStartTime = Date.now();
-
-    if (generateCommand) {
-      // Use the specified generate command
-      await this.runCommand(generateCommand, this.config.resolvedPaths.client);
-    } else if (generator === '@hey-api/openapi-ts') {
-      // Default command for @hey-api/openapi-ts
-      await this.runCommand(
-        'npx @hey-api/openapi-ts',
-        this.config.resolvedPaths.client
-      );
-    } else {
-      throw new GeneratorError(
-        `No generate command specified for generator ${generator}`,
-        generator,
-        'generate'
-      );
-    }
-
-    if (showDurations) {
-      if (!this.config.log?.quiet) {
-        this.logger.info(
-          chalk.green(
-            `✅ TypeScript client generated (${Date.now() - genCommandStartTime}ms)`
-          )
+        throw new GeneratorError(
+          `No generate command specified for generator ${generator}`,
+          generator,
+          'generate'
         );
       }
-    } else {
-      if (!this.config.log?.quiet) {
-        this.logger.info(chalk.green('✅ TypeScript client generated'));
-      }
-    }
 
-    // Save the spec hash after successful generation
-    if (this.lastGeneratedSpecHash) {
-      try {
-        const { writeFileSync } = await import('fs');
-        writeFileSync(specHashPath, this.lastGeneratedSpecHash, 'utf-8');
-      } catch (err) {
-        // Non-critical, continue
+      if (showDurations) {
+        spinner.text = `TypeScript client generated (${Date.now() - genCommandStartTime}ms)`;
       }
+
+      // Save the spec hash after successful generation
+      if (this.lastGeneratedSpecHash) {
+        try {
+          const { writeFileSync } = await import('fs');
+          writeFileSync(specHashPath, this.lastGeneratedSpecHash, 'utf-8');
+        } catch (err) {
+          // Non-critical, continue
+        }
+      }
+
+      spinner.succeed('TypeScript client generated successfully');
+    } catch (error) {
+      spinner.fail('Failed to generate TypeScript client');
+      throw error;
     }
   }
 
@@ -627,32 +619,75 @@ export class DevSyncEngine extends EventEmitter {
     const { buildCommand } = this.config.services.client;
     if (!buildCommand) return;
 
-    if (!this.config.log?.quiet) {
-      this.logger.info(chalk.blue('🔨 Building client package...'));
-    }
+    const spinner = ora('Building client package...').start();
 
-    // Check if fast build is available and we're in development
+    try {
+      // Check if fast build is available and we're in development
+      const packageJsonPath = join(
+        this.config.resolvedPaths.client,
+        'package.json'
+      );
+      let useFastBuild = false;
+
+      try {
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+        if (packageJson.scripts && packageJson.scripts['build:fast']) {
+          useFastBuild = true;
+        }
+      } catch (err) {
+        // Ignore, use regular build
+      }
+
+      const commandToRun = useFastBuild
+        ? buildCommand.replace('build', 'build:fast')
+        : buildCommand;
+
+      spinner.text = useFastBuild
+        ? 'Running fast build...'
+        : 'Running build command...';
+      await this.runCommand(commandToRun, this.config.resolvedPaths.client);
+
+      // Update package.json with OATS metadata after successful build
+      await this.updateClientVersionMetadata();
+
+      spinner.succeed('Client package built successfully');
+    } catch (error) {
+      spinner.fail('Failed to build client package');
+      throw error;
+    }
+  }
+
+  /**
+   * Update client package.json with OATS metadata
+   */
+  private async updateClientVersionMetadata(): Promise<void> {
     const packageJsonPath = join(
       this.config.resolvedPaths.client,
       'package.json'
     );
-    let useFastBuild = false;
 
     try {
       const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-      if (packageJson.scripts && packageJson.scripts['build:fast']) {
-        useFastBuild = true;
-      }
-    } catch (err) {
-      // Ignore, use regular build
-    }
 
-    const commandToRun = useFastBuild
-      ? buildCommand.replace('build', 'build:fast')
-      : buildCommand;
-    await this.runCommand(commandToRun, this.config.resolvedPaths.client);
-    if (!this.config.log?.quiet) {
-      this.logger.info(chalk.green('✅ Client package built'));
+      // Add OATS metadata
+      packageJson._oats = {
+        generated: new Date().toISOString(),
+        apiSpecHash: this.lastGeneratedSpecHash || 'unknown',
+        version: packageJson.version || '1.0.0',
+      };
+
+      // Write back the updated package.json
+      writeFileSync(
+        packageJsonPath,
+        JSON.stringify(packageJson, null, 2) + '\n'
+      );
+
+      this.logger.debug(
+        chalk.dim(`Updated client metadata with API spec hash`)
+      );
+    } catch (error) {
+      this.logger.warn('Failed to update client version metadata:', error);
+      // Non-critical error, continue
     }
   }
 
@@ -660,12 +695,12 @@ export class DevSyncEngine extends EventEmitter {
    * Link packages for local development
    */
   private async linkPackages(): Promise<void> {
-    if (!this.config.log?.quiet) {
-      this.logger.info(chalk.blue('🔗 Linking packages...'));
-    }
-
     const { linkCommand } = this.config.services.client;
-    if (linkCommand) {
+    if (!linkCommand) return;
+
+    const spinner = ora('Linking packages...').start();
+
+    try {
       // Link the client package
       await this.runCommand(linkCommand, this.config.resolvedPaths.client);
 
@@ -706,12 +741,14 @@ export class DevSyncEngine extends EventEmitter {
           // Ignore errors, this is optional
         }
       }
-    }
 
-    if (!this.config.log?.quiet) {
-      this.logger.info(chalk.green('✅ Packages linked'));
+      spinner.succeed('Packages linked successfully');
+    } catch (error) {
+      spinner.fail('Failed to link packages');
+      throw error;
     }
   }
+
 
   /**
    * Run a shell command

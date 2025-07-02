@@ -94,7 +94,8 @@ export async function detect(options: DetectOptions): Promise<void> {
     writeFileSync(outputPath, configContent);
     writeSpinner.succeed(`Configuration saved to ${outputPath}`);
 
-    console.log(`\n${chalk.green('✅ Detection complete!')}`);
+    console.log(); // Empty line
+    ora().succeed('Detection complete!');
     console.log(`\n${chalk.bold('Next steps:')}`);
     console.log(chalk.cyan('  1. Review the configuration:'));
     console.log(chalk.dim(`     cat ${outputPath}`));

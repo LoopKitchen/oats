@@ -10,7 +10,7 @@ import { existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 import chalk from 'chalk';
-import inquirer from 'inquirer';
+import { confirm, input, number, select } from '@inquirer/prompts';
 import ora from 'ora';
 
 import { validateConfig } from '../config/schema.js';
@@ -23,24 +23,6 @@ interface InitOptions {
   force?: boolean;
   yes?: boolean;
   template?: string;
-}
-
-interface ProjectAnswers {
-  projectType: 'monorepo' | 'separate' | 'custom';
-  backendPath: string;
-  backendPort: number;
-  backendCommand: string;
-  apiSpecPath: string;
-  clientPath: string;
-  clientPackageName: string;
-  clientGenerator: string;
-  clientBuildCommand: string;
-  includeFrontend: boolean;
-  frontendPath?: string;
-  frontendPort?: number;
-  frontendCommand?: string;
-  enableNotifications: boolean;
-  syncStrategy: 'smart' | 'aggressive' | 'conservative';
 }
 
 const PROJECT_TEMPLATES = {
@@ -78,14 +60,10 @@ export async function init(options: InitOptions): Promise<void> {
   // Check if config already exists
   if (existsSync(configPath) && !options.force) {
     if (!options.yes) {
-      const { overwrite } = await inquirer.prompt<{ overwrite: boolean }>([
-        {
-          type: 'confirm',
-          name: 'overwrite',
-          message: 'oats.config.json already exists. Overwrite?',
-          default: false,
-        },
-      ]);
+      const overwrite = await confirm({
+        message: 'oats.config.json already exists. Overwrite?',
+        default: false,
+      });
 
       if (!overwrite) {
         console.log(chalk.yellow('\nInit cancelled.'));
@@ -142,7 +120,8 @@ export async function init(options: InitOptions): Promise<void> {
     writeFileSync(configPath, configContent);
     writeSpinner.succeed('Configuration created!');
 
-    console.log(`\n${chalk.green('✅ OATSJS initialized successfully!')}`);
+    ora().succeed('OATSJS initialized successfully!');
+    
     console.log(
       `\n${chalk.bold('Configuration saved to:')}`,
       chalk.cyan(configPath)
@@ -267,188 +246,170 @@ async function createDefaultConfig(): Promise<OatsConfig> {
 async function interactiveSetup(): Promise<OatsConfig> {
   console.log(chalk.bold("Let's configure your services:\n"));
 
-  const answers = await inquirer.prompt<ProjectAnswers>([
-    {
-      type: 'list',
-      name: 'projectType',
-      message: "What's your project structure?",
-      choices: Object.entries(PROJECT_TEMPLATES).map(([key, value]) => ({
-        name: value.name,
-        value: key,
-      })),
+  // Collect answers step by step
+  const projectType = await select<'monorepo' | 'separate' | 'custom'>({
+    message: "What's your project structure?",
+    choices: Object.entries(PROJECT_TEMPLATES).map(([key, value]) => ({
+      name: value.name,
+      value: key as 'monorepo' | 'separate' | 'custom',
+    })),
+  });
+
+  const backendPath = await input({
+    message: 'Backend path:',
+    default: PROJECT_TEMPLATES[projectType].backend,
+    validate: (value) => value.length > 0 || 'Backend path is required',
+  });
+
+  const backendPort = await number({
+    message: 'Backend port:',
+    default: 4000,
+    validate: (value) => {
+      if (!value || value < 1 || value > 65535) {
+        return 'Port must be between 1 and 65535';
+      }
+      return true;
     },
-    {
-      type: 'input',
-      name: 'backendPath',
-      message: 'Backend path:',
-      default: (answers: ProjectAnswers) =>
-        PROJECT_TEMPLATES[answers.projectType].backend,
-      validate: (input: string) =>
-        input.length > 0 || 'Backend path is required',
+  });
+
+  const backendCommand = await input({
+    message: 'Backend start command:',
+    default: 'npm run dev',
+  });
+
+  const apiSpecPath = await input({
+    message: 'API spec path (relative to backend):',
+    default: 'src/swagger.json',
+    validate: (value) => value.length > 0 || 'API spec path is required',
+  });
+
+  const clientPath = await input({
+    message: 'Client path:',
+    default: PROJECT_TEMPLATES[projectType].client,
+    validate: (value) => value.length > 0 || 'Client path is required',
+  });
+
+  const clientPackageName = await input({
+    message: 'Client package name:',
+    default: '@myorg/api-client',
+    validate: (value) => {
+      if (
+        !value.match(/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/)
+      ) {
+        return 'Invalid package name format';
+      }
+      return true;
     },
-    {
-      type: 'number',
-      name: 'backendPort',
-      message: 'Backend port:',
-      default: 4000,
-      validate: (input: number) => {
-        if (input < 1 || input > 65535) {
-          return 'Port must be between 1 and 65535';
-        }
-        return true;
-      },
-    },
-    {
-      type: 'input',
-      name: 'backendCommand',
-      message: 'Backend start command:',
-      default: 'npm run dev',
-    },
-    {
-      type: 'input',
-      name: 'apiSpecPath',
-      message: 'API spec path (relative to backend):',
-      default: 'src/swagger.json',
-      validate: (input: string) =>
-        input.length > 0 || 'API spec path is required',
-    },
-    {
-      type: 'input',
-      name: 'clientPath',
-      message: 'Client path:',
-      default: (answers: ProjectAnswers) =>
-        PROJECT_TEMPLATES[answers.projectType].client,
-      validate: (input: string) =>
-        input.length > 0 || 'Client path is required',
-    },
-    {
-      type: 'input',
-      name: 'clientPackageName',
-      message: 'Client package name:',
-      default: '@myorg/api-client',
-      validate: (input: string) => {
-        if (
-          !input.match(/^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/)
-        ) {
-          return 'Invalid package name format';
-        }
-        return true;
-      },
-    },
-    {
-      type: 'list',
-      name: 'clientGenerator',
-      message: 'Client generator:',
-      choices: [
-        { name: 'Custom (use your existing generator)', value: 'custom' },
-        { name: '@hey-api/openapi-ts', value: '@hey-api/openapi-ts' },
-        { name: 'swagger-typescript-api', value: 'swagger-typescript-api' },
-        { name: 'openapi-generator-cli', value: 'openapi-generator-cli' },
-      ],
-      default: 'custom',
-    },
-    {
-      type: 'input',
-      name: 'clientBuildCommand',
+  });
+
+  const clientGenerator = await select({
+    message: 'Client generator:',
+    choices: [
+      { name: 'Custom (use your existing generator)', value: 'custom' },
+      { name: '@hey-api/openapi-ts', value: '@hey-api/openapi-ts' },
+      { name: 'swagger-typescript-api', value: 'swagger-typescript-api' },
+      { name: 'openapi-generator-cli', value: 'openapi-generator-cli' },
+    ],
+    default: 'custom',
+  });
+
+  let clientBuildCommand = 'npm run build';
+  if (clientGenerator === 'custom') {
+    clientBuildCommand = await input({
       message: 'Client build command:',
       default: 'npm run build',
-      when: (answers: ProjectAnswers) => answers.clientGenerator === 'custom',
-    },
-    {
-      type: 'confirm',
-      name: 'includeFrontend',
-      message: 'Do you want OATS to manage your frontend service?',
-      default: false,
-    },
-    {
-      type: 'input',
-      name: 'frontendPath',
+    });
+  }
+
+  const includeFrontend = await confirm({
+    message: 'Do you want OATS to manage your frontend service?',
+    default: false,
+  });
+
+  let frontendPath: string | undefined;
+  let frontendPort: number | undefined;
+  let frontendCommand: string | undefined;
+
+  if (includeFrontend) {
+    frontendPath = await input({
       message: 'Frontend path:',
-      default: (answers: ProjectAnswers) =>
-        PROJECT_TEMPLATES[answers.projectType].frontend,
-      when: (answers: ProjectAnswers) => answers.includeFrontend,
-    },
-    {
-      type: 'number',
-      name: 'frontendPort',
+      default: PROJECT_TEMPLATES[projectType].frontend,
+    });
+
+    frontendPort = await number({
       message: 'Frontend port:',
       default: 3000,
-      when: (answers: ProjectAnswers) => answers.includeFrontend,
-      validate: (input: number, answers?: ProjectAnswers) => {
-        if (input < 1 || input > 65535) {
+      validate: (value) => {
+        if (!value || value < 1 || value > 65535) {
           return 'Port must be between 1 and 65535';
         }
-        if (answers && input === answers.backendPort) {
+        if (value === backendPort) {
           return 'Frontend port must be different from backend port';
         }
         return true;
       },
-    },
-    {
-      type: 'input',
-      name: 'frontendCommand',
+    });
+
+    frontendCommand = await input({
       message: 'Frontend start command:',
       default: 'npm run dev',
-      when: (answers: ProjectAnswers) => answers.includeFrontend,
-    },
-    {
-      type: 'confirm',
-      name: 'enableNotifications',
-      message: 'Enable desktop notifications?',
-      default: false,
-    },
-    {
-      type: 'list',
-      name: 'syncStrategy',
-      message: 'Sync strategy:',
-      choices: [
-        {
-          name: 'Smart (recommended) - Only sync on meaningful changes',
-          value: 'smart',
-        },
-        { name: 'Aggressive - Sync on any change', value: 'aggressive' },
-        {
-          name: 'Conservative - Only sync on major changes',
-          value: 'conservative',
-        },
-      ],
-      default: 'smart',
-    },
-  ]);
+    });
+  }
+
+  const enableNotifications = await confirm({
+    message: 'Enable desktop notifications?',
+    default: false,
+  });
+
+  const syncStrategy = await select<'smart' | 'aggressive' | 'conservative'>({
+    message: 'Sync strategy:',
+    choices: [
+      {
+        name: 'Smart (recommended) - Only sync on meaningful changes',
+        value: 'smart',
+      },
+      { name: 'Aggressive - Sync on any change', value: 'aggressive' },
+      {
+        name: 'Conservative - Only sync on major changes',
+        value: 'conservative',
+      },
+    ],
+    default: 'smart',
+  });
 
   // Build configuration
   const config: OatsConfig = {
     services: {
       backend: {
-        path: answers.backendPath,
-        port: answers.backendPort,
-        startCommand: answers.backendCommand,
+        path: backendPath,
+        port: backendPort || 4000,
+        startCommand: backendCommand,
         apiSpec: {
-          path: answers.apiSpecPath,
+          path: apiSpecPath,
         },
       },
       client: {
-        path: answers.clientPath,
-        packageName: answers.clientPackageName,
-        generator: answers.clientGenerator as any,
+        path: clientPath,
+        packageName: clientPackageName,
+        generator: clientGenerator as any,
         generateCommand:
-          answers.clientGenerator === 'custom' ? 'npm run generate' : undefined,
-        buildCommand: answers.clientBuildCommand || 'npm run build',
+          clientGenerator === 'custom' ? 'npm run generate' : undefined,
+        buildCommand: clientBuildCommand,
         linkCommand: 'npm link',
       },
     },
     sync: {
-      strategy: answers.syncStrategy,
-      notifications: answers.enableNotifications,
+      strategy: syncStrategy,
+      notifications: enableNotifications,
     },
   };
 
   // Add frontend if included
-  if (answers.includeFrontend && answers.frontendPath) {
+  if (includeFrontend && frontendPath) {
     config.services.frontend = {
-      path: answers.frontendPath,
-      port: answers.frontendPort || 3000,
-      startCommand: answers.frontendCommand || 'npm run dev',
+      path: frontendPath,
+      port: frontendPort || 3000,
+      startCommand: frontendCommand || 'npm run dev',
       packageLinkCommand: 'npm link',
     };
   }

@@ -10,11 +10,13 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { watch } from 'chokidar';
 import chalk from 'chalk';
+import ora from 'ora';
 
 import { ProcessManager } from '../utils/process-manager.js';
 import { PortManager } from '../utils/port-manager.js';
 import { Logger } from '../utils/logger.js';
 import { DebugManager } from '../utils/debug.js';
+import { ShutdownManager } from '../utils/shutdown-manager.js';
 
 import { DevSyncEngine } from './dev-sync-optimized.js';
 import { BaseService, ServiceState } from './services/base-service.js';
@@ -28,19 +30,28 @@ class BackendService extends BaseService {
 
     const maxAttempts = 30;
     const checkInterval = 1000;
+    const spinner = ora(`Waiting for backend service on port ${this.config.port}...`).start();
 
-    for (let i = 0; i < maxAttempts; i++) {
-      const isReady = await PortManager.isPortInUse(this.config.port);
-      if (isReady) {
-        this.logger.debug(`Backend service ready on port ${this.config.port}`);
-        return;
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
+        const isReady = await PortManager.isPortInUse(this.config.port);
+        if (isReady) {
+          spinner.succeed(`Backend service ready on port ${this.config.port}`);
+          this.logger.debug(`Backend service ready on port ${this.config.port}`);
+          return;
+        }
+        spinner.text = `Waiting for backend service on port ${this.config.port}... (${i + 1}/${maxAttempts})`;
+        await new Promise((resolve) => setTimeout(resolve, checkInterval));
       }
-      await new Promise((resolve) => setTimeout(resolve, checkInterval));
-    }
 
-    throw new Error(
-      `Backend service failed to start on port ${this.config.port}`
-    );
+      spinner.fail(`Backend service did not start within ${maxAttempts} seconds`);
+      throw new Error(
+        `Backend service failed to start on port ${this.config.port}`
+      );
+    } catch (error) {
+      spinner.fail('Failed to start backend service');
+      throw error;
+    }
   }
 
   protected async checkPort(): Promise<void> {
@@ -56,7 +67,9 @@ class BackendService extends BaseService {
 class ClientService extends BaseService {
   protected async waitForReady(): Promise<void> {
     // Client generation is typically quick
+    const spinner = ora('Initializing client service...').start();
     await new Promise((resolve) => setTimeout(resolve, 2000));
+    spinner.succeed('Client service ready');
   }
 }
 
@@ -66,19 +79,28 @@ class FrontendService extends BaseService {
 
     const maxAttempts = 60; // Frontend can take longer
     const checkInterval = 1000;
+    const spinner = ora(`Waiting for frontend service on port ${this.config.port}...`).start();
 
-    for (let i = 0; i < maxAttempts; i++) {
-      const isReady = await PortManager.isPortInUse(this.config.port);
-      if (isReady) {
-        this.logger.debug(`Frontend service ready on port ${this.config.port}`);
-        return;
+    try {
+      for (let i = 0; i < maxAttempts; i++) {
+        const isReady = await PortManager.isPortInUse(this.config.port);
+        if (isReady) {
+          spinner.succeed(`Frontend service ready on port ${this.config.port}`);
+          this.logger.debug(`Frontend service ready on port ${this.config.port}`);
+          return;
+        }
+        spinner.text = `Waiting for frontend service on port ${this.config.port}... (${i + 1}/${maxAttempts})`;
+        await new Promise((resolve) => setTimeout(resolve, checkInterval));
       }
-      await new Promise((resolve) => setTimeout(resolve, checkInterval));
-    }
 
-    throw new Error(
-      `Frontend service failed to start on port ${this.config.port}`
-    );
+      spinner.fail(`Frontend service did not start within ${maxAttempts} seconds`);
+      throw new Error(
+        `Frontend service failed to start on port ${this.config.port}`
+      );
+    } catch (error) {
+      spinner.fail('Failed to start frontend service');
+      throw error;
+    }
   }
 
   protected async checkPort(): Promise<void> {
@@ -95,9 +117,9 @@ export class DevSyncOrchestrator extends EventEmitter {
   private config: RuntimeConfig;
   private logger: Logger;
   private processManager: ProcessManager;
+  private shutdownManager: ShutdownManager;
   private services: Map<string, BaseService> = new Map();
   private syncEngine?: DevSyncEngine;
-  private isShuttingDown = false;
   private linkedPackages: Set<string> = new Set();
   private configWatcher?: any;
 
@@ -106,6 +128,7 @@ export class DevSyncOrchestrator extends EventEmitter {
     this.config = config;
     this.logger = new Logger('Orchestrator');
     this.processManager = new ProcessManager();
+    this.shutdownManager = ShutdownManager.getInstance();
 
     // Initialize logging
     const logLevel = config.log?.level || 'info';
@@ -222,11 +245,17 @@ export class DevSyncOrchestrator extends EventEmitter {
       );
       this.printServiceStatus();
 
+      // Set up signal handlers for graceful shutdown
+      this.setupSignalHandlers();
+
       // Watch config file for changes
       this.watchConfigFile();
     } catch (error) {
       console.error(chalk.red.bold('\n❌ Failed to start services\n'));
-      await this.shutdown();
+      // Only shutdown if this is the initial start, not a config reload
+      if (!this.configWatcher) {
+        await this.shutdown();
+      }
       throw error;
     }
   }
@@ -235,51 +264,35 @@ export class DevSyncOrchestrator extends EventEmitter {
    * Shutdown all services
    */
   async shutdown(): Promise<void> {
-    await this.stop();
-    process.exit(0);
+    await this.shutdownManager.shutdown({
+      syncEngine: this.syncEngine,
+      services: this.services,
+      processManager: this.processManager,
+      configWatcher: this.configWatcher,
+      unlinkPackages: this.unlinkPackages.bind(this)
+    });
   }
 
   /**
    * Stop all services without exiting the process
    */
-  private async stop(): Promise<void> {
-    if (this.isShuttingDown) return;
-    this.isShuttingDown = true;
-
-    this.logger.info(chalk.yellow.bold('\n🛑 Shutting down services...\n'));
-
-    // Stop sync engine
-    if (this.syncEngine) {
-      this.syncEngine.stop();
-      this.syncEngine = undefined;
-    }
-
-    // Stop all services
-    const stopPromises = Array.from(this.services.values()).map((service) =>
-      service
-        .stop()
-        .catch((err) =>
-          this.logger.error(`Failed to stop ${service.getInfo().name}:`, err)
-        )
-    );
-    await Promise.all(stopPromises);
-
-    // Kill any remaining processes
-    await this.processManager.killAll();
-
-    // Unlink packages
-    await this.unlinkPackages();
-
-    // Stop config watcher
-    if (this.configWatcher) {
-      await this.configWatcher.close();
+  private async stop(keepConfigWatcher = false): Promise<void> {
+    await this.shutdownManager.shutdown({
+      syncEngine: this.syncEngine,
+      services: this.services,
+      processManager: this.processManager,
+      configWatcher: this.configWatcher,
+      unlinkPackages: this.unlinkPackages.bind(this)
+    }, {
+      keepConfigWatcher,
+      exitProcess: false
+    });
+    
+    // Clear service references after shutdown
+    this.syncEngine = undefined;
+    if (!keepConfigWatcher) {
       this.configWatcher = undefined;
     }
-
-    this.logger.info(chalk.green.bold('\n✅ Shutdown complete\n'));
-
-    // Reset shutdown flag for potential restart
-    this.isShuttingDown = false;
   }
 
   /**
@@ -293,15 +306,23 @@ export class DevSyncOrchestrator extends EventEmitter {
     const frontendPath = this.config.resolvedPaths.frontend!;
 
     const pm = this.detectPackageManager(frontendPath);
+    const spinner = ora(`Linking ${clientName} to frontend...`).start();
 
-    // Link in client directory
-    await this.runCommand(`${pm} link`, clientPath);
-    this.linkedPackages.add(clientName);
+    try {
+      // Link in client directory
+      spinner.text = `Creating ${pm} link for ${clientName}...`;
+      await this.runCommand(`${pm} link`, clientPath);
+      this.linkedPackages.add(clientName);
 
-    // Link to frontend
-    await this.runCommand(`${pm} link ${clientName}`, frontendPath);
+      // Link to frontend
+      spinner.text = `Linking ${clientName} to frontend project...`;
+      await this.runCommand(`${pm} link ${clientName}`, frontendPath);
 
-    this.logger.info(chalk.green(`✅ Linked ${clientName} to frontend`));
+      spinner.succeed(`Linked ${clientName} to frontend`);
+    } catch (error) {
+      spinner.fail(`Failed to link ${clientName}`);
+      throw error;
+    }
   }
 
   /**
@@ -364,7 +385,7 @@ export class DevSyncOrchestrator extends EventEmitter {
     if (!this.syncEngine) return;
 
     this.syncEngine.on('generation-completed', ({ linkedPaths }) => {
-      console.log(chalk.green('✅ Client regeneration completed'));
+      ora().succeed('Client regeneration completed');
       if (linkedPaths?.length) {
         console.log(chalk.dim('Updated paths:'));
         linkedPaths.forEach((path: string) =>
@@ -382,25 +403,18 @@ export class DevSyncOrchestrator extends EventEmitter {
    * Set up signal handlers
    */
   private setupSignalHandlers(): void {
-    const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
-
-    signals.forEach((signal) => {
-      process.on(signal, async () => {
-        console.log(chalk.yellow(`\n📍 Received ${signal}`));
-        await this.shutdown();
-      });
-    });
-
-    process.on('uncaughtException', async (error) => {
-      console.error(chalk.red('\n❌ Uncaught exception:'), error);
-      await this.shutdown();
-    });
+    this.shutdownManager.setupSignalHandlers(() => this.shutdown());
   }
 
   /**
    * Watch config file for changes
    */
   private watchConfigFile(): void {
+    // If config watcher already exists, don't create a new one
+    if (this.configWatcher) {
+      return;
+    }
+
     // Watch all possible config files
     const configPatterns = [
       'oats.config.json',
@@ -417,8 +431,8 @@ export class DevSyncOrchestrator extends EventEmitter {
       console.log(chalk.yellow('\n🔄 Configuration changed, restarting...\n'));
 
       try {
-        // Stop all services but don't exit the process
-        await this.stop();
+        // Stop all services but keep the config watcher for restart
+        await this.stop(true);
 
         // Re-read and validate the configuration using the config loader
         const { loadConfigFromFile, findConfigFile } = await import(
@@ -490,13 +504,34 @@ export class DevSyncOrchestrator extends EventEmitter {
         this.createServices();
 
         // Restart everything
-        await this.start();
+        try {
+          await this.start();
+        } catch (startError) {
+          // Don't call shutdown() here as it will exit the process
+          // Instead, log the error and keep the orchestrator running
+          console.error(
+            chalk.red('❌ Failed to restart after config change:'),
+            startError
+          );
+          console.log(
+            chalk.yellow(
+              '\nServices are stopped. Fix the issue and save the config to retry.'
+            )
+          );
+
+          // Keep watching for config changes so user can fix and retry
+          return;
+        }
       } catch (error) {
         console.error(
           chalk.red('❌ Failed to restart after config change:'),
           error
         );
-        console.log(chalk.yellow('Please restart OATS manually.'));
+        console.log(
+          chalk.yellow(
+            '\nServices are stopped. Fix the issue and save the config to retry.'
+          )
+        );
       }
     });
   }

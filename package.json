@@ -1,6 +1,6 @@
 {
   "name": "@tryloop/oats",
-  "version": "2.2.19",
+  "version": "2.2.20",
   "description": "🌾 OATS - OpenAPI TypeScript Sync. The missing link between your OpenAPI specs and TypeScript applications. Automatically watch, generate, and sync TypeScript clients from your API definitions.",
   "keywords": [
     "oats",
@@ -67,16 +67,14 @@
     "execa": "^8.0.1",
     "find-up": "^7.0.0",
     "glob": "^10.3.0",
-    "inquirer": "^9.2.23",
+    "@inquirer/prompts": "^5.0.0",
     "joi": "^17.12.0",
     "lodash.debounce": "^4.0.8",
     "node-notifier": "^10.0.1",
-    "ora": "^8.2.0",
-    "restore-cursor": "^5.1.0"
+    "ora": "^8.2.0"
   },
   "devDependencies": {
     "@types/detect-port": "^2.0.0",
-    "@types/inquirer": "^9.0.0",
     "@types/jest": "^29.5.0",
     "@types/lodash.debounce": "^4.0.9",
     "@types/node": "^20.11.0",
@@ -114,6 +112,7 @@
     "access": "public"
   },
   "resolutions": {
-    "signal-exit": "^4.1.0"
+    "signal-exit": "^4.1.0",
+    "onetime": "^6.0.0"
   }
 }

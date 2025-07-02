@@ -1,10 +1,12 @@
 import { EventEmitter } from 'events';
 import { ExecaChildProcess } from 'execa';
 import chalk from 'chalk';
+import ora from 'ora';
 
 import { ProcessManager } from '../../utils/process-manager.js';
 import { Logger } from '../../utils/logger.js';
 import { ServiceStartError } from '../../errors/index.js';
+import { ShutdownManager } from '../../utils/shutdown-manager.js';
 
 export interface ServiceConfig {
   name: string;
@@ -103,7 +105,7 @@ export abstract class BaseService extends EventEmitter {
       this.startTime = new Date();
       this.setState(ServiceState.RUNNING);
       if (!this.runtimeConfig?.log?.quiet) {
-        console.log(chalk.green(`✅ ${this.config.name} service started`));
+        ora().succeed(`${this.config.name} service started`);
       }
     } catch (error: any) {
       this.error = error;
@@ -137,7 +139,7 @@ export abstract class BaseService extends EventEmitter {
     this.setState(ServiceState.STOPPED);
 
     if (!this.runtimeConfig?.log?.quiet) {
-      console.log(chalk.green(`✅ ${this.config.name} service stopped`));
+      ora().succeed(`${this.config.name} service stopped`);
     }
   }
 
@@ -159,7 +161,9 @@ export abstract class BaseService extends EventEmitter {
     if (!this.process) return;
 
     this.process.stdout?.on('data', (data) => {
-      const output = data.toString();
+      const output = data.toString().trim();
+      if (!output) return;
+      
       this.handleOutput(output);
 
       // Show service output based on log level and showServiceOutput setting
@@ -168,7 +172,9 @@ export abstract class BaseService extends EventEmitter {
         this.runtimeConfig?.log?.showServiceOutput !== false;
 
       // Only show service output in debug mode or if explicitly enabled in info mode
-      if (showServiceOutput && (logLevel === 'debug' || logLevel === 'info')) {
+      // Don't show output during shutdown
+      const shutdownManager = ShutdownManager.getInstance();
+      if (showServiceOutput && (logLevel === 'debug' || logLevel === 'info') && !shutdownManager.isShutdownInProgress()) {
         console.log(chalk.gray(`[${this.config.name}] ${output}`));
       }
     });
@@ -179,13 +185,19 @@ export abstract class BaseService extends EventEmitter {
 
       // Show errors based on log level
       const logLevel = this.runtimeConfig?.log?.level || 'info';
-      // Always show errors unless log level is set higher than error
-      if (logLevel !== 'none') {
+      const shutdownManager = ShutdownManager.getInstance();
+      // Always show errors unless log level is set higher than error or during shutdown
+      if (logLevel !== 'none' && !shutdownManager.isShutdownInProgress()) {
         console.error(chalk.red(`[${this.config.name}] ${output}`));
       }
     });
 
     this.process.on('exit', (code) => {
+      // Don't show exit messages during shutdown
+      if (this.state === ServiceState.STOPPING) {
+        return;
+      }
+      
       if (this.state === ServiceState.RUNNING) {
         this.error = new Error(`Process exited unexpectedly with code ${code}`);
         this.setState(ServiceState.ERROR);

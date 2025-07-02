@@ -5,18 +5,26 @@
  */
 
 import { existsSync, readFileSync, unlinkSync } from 'fs';
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import chalk from 'chalk';
 import type { OatsConfig } from '../types/config.types.js';
 import { ConfigError } from '../errors/index.js';
+
+const execAsync = promisify(exec);
 
 /**
  * Check if esbuild is available
  */
-function hasEsbuild(): boolean {
+async function hasEsbuild(): Promise<boolean> {
   try {
-    execSync('npx esbuild --version', { stdio: 'ignore' });
+    // Check if esbuild is available locally first
+    await execAsync('node_modules/.bin/esbuild --version');
     return true;
   } catch {
+    // If not available locally, npx will download it
+    console.log(chalk.dim('\n📦 First-time setup: downloading esbuild for TypeScript config support...'));
+    console.log(chalk.dim('   This may take a minute but only happens once.\n'));
     return false;
   }
 }
@@ -28,7 +36,8 @@ export async function loadTypeScriptConfig(
   configPath: string
 ): Promise<OatsConfig> {
   // Check if we can use esbuild
-  if (!hasEsbuild()) {
+  const esbuildAvailable = await hasEsbuild();
+  if (!esbuildAvailable) {
     // Fallback to simple parsing
     return parseTypeScriptConfig(configPath);
   }
@@ -37,9 +46,9 @@ export async function loadTypeScriptConfig(
 
   try {
     // Transpile TypeScript to JavaScript using esbuild
-    execSync(
-      `npx esbuild ${configPath} --bundle --platform=node --format=cjs --external:@tryloop/oats --outfile=${tempFile}`,
-      { stdio: 'ignore' }
+    // Using execAsync to avoid blocking the event loop
+    await execAsync(
+      `npx esbuild ${configPath} --bundle --platform=node --format=cjs --external:@tryloop/oats --outfile=${tempFile}`
     );
 
     // Load the transpiled JavaScript

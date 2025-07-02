@@ -2,6 +2,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import detectPort from 'detect-port';
 import chalk from 'chalk';
+import ora from 'ora';
 
 import { PlatformUtils } from './platform.js';
 import { Logger } from './logger.js';
@@ -98,37 +99,51 @@ export class PortManager {
       chalk.yellow(`⚠️  Port ${port} is already in use for ${serviceName}`)
     );
 
-    const pids = await this.getProcessesUsingPort(port);
+    const spinner = ora(`Attempting to free port ${port}...`).start();
 
-    if (pids.length === 0) {
-      logger.warn(`Port ${port} is in use but no PIDs found`);
-      throw new Error(
-        `Port ${port} is in use but could not identify the process`
-      );
-    }
+    try {
+      const pids = await this.getProcessesUsingPort(port);
 
-    console.log(chalk.yellow(`🔄 Attempting to free port ${port}...`));
-
-    // Kill all processes using the port
-    for (const pid of pids) {
-      logger.debug(`Killing process ${pid} using port ${port}`);
-      try {
-        await PlatformUtils.killProcess(parseInt(pid, 10));
-      } catch (err) {
-        logger.debug(`Failed to kill process ${pid}:`, err);
+      if (pids.length === 0) {
+        spinner.fail(
+          `Port ${port} is in use but could not find process using it`
+        );
+        logger.warn(`Port ${port} is in use but no PIDs found`);
+        throw new Error(
+          `Port ${port} is in use but could not identify the process`
+        );
       }
+
+      spinner.text = `Found ${pids.length} process(es) using port ${port}. Terminating...`;
+
+      // Kill all processes using the port
+      for (const pid of pids) {
+        logger.debug(`Killing process ${pid} using port ${port}`);
+        try {
+          await PlatformUtils.killProcess(parseInt(pid, 10));
+        } catch (err) {
+          logger.debug(`Failed to kill process ${pid}:`, err);
+        }
+      }
+
+      spinner.text = `Waiting for port ${port} to be released...`;
+      // Wait for port to be released
+      await PlatformUtils.waitForPortCleanup();
+
+      // Verify port is now free
+      const stillInUse = await this.isPortInUse(port);
+      if (stillInUse) {
+        spinner.fail(`Failed to free port ${port} after killing processes`);
+        throw new Error(`Failed to free port ${port} after killing processes`);
+      }
+
+      spinner.succeed(`Port ${port} is now free`);
+    } catch (error) {
+      if (!spinner.isSpinning) {
+        spinner.fail(`Failed to free port ${port}`);
+      }
+      throw error;
     }
-
-    // Wait for port to be released
-    await PlatformUtils.waitForPortCleanup();
-
-    // Verify port is now free
-    const stillInUse = await this.isPortInUse(port);
-    if (stillInUse) {
-      throw new Error(`Failed to free port ${port} after killing processes`);
-    }
-
-    console.log(chalk.green(`✅ Port ${port} is now free`));
   }
 
   /**

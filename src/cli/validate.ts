@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join, resolve, basename } from 'path';
 
 import chalk from 'chalk';
+import ora from 'ora';
 
 import { validateConfig } from '../config/schema.js';
 import { loadConfigFromFile, findConfigFile } from '../config/loader.js';
@@ -93,7 +94,7 @@ export async function validate(options: ValidateOptions): Promise<void> {
         }
       });
     } else {
-      console.log(chalk.green('✅ Configuration schema is valid!'));
+      ora().succeed('Configuration schema is valid!');
     }
 
     // Check paths exist
@@ -128,7 +129,8 @@ export async function validate(options: ValidateOptions): Promise<void> {
     ) {
       console.log(chalk.yellow('\n⚠️  Validation completed with warnings'));
     } else {
-      console.log(chalk.green('\n✅ Configuration is fully valid!'));
+      console.log(); // Empty line
+      ora().succeed('Configuration is fully valid!');
       console.log(chalk.dim('\nYou can now run: oats start'));
     }
   } catch (error) {
@@ -203,11 +205,11 @@ async function checkPaths(config: OatsConfig): Promise<PathCheck[]> {
 function displayPathChecks(checks: PathCheck[]): void {
   checks.forEach(({ name, path, required, exists }) => {
     if (exists) {
-      console.log(chalk.green(`✅ ${name}: ${path}`));
+      ora().succeed(`${name}: ${path}`);
     } else if (required) {
-      console.log(chalk.red(`❌ ${name}: ${path} (not found - required)`));
+      ora().fail(`${name}: ${path} (not found - required)`);
     } else {
-      console.log(chalk.yellow(`⚠️  ${name}: ${path} (not found - optional)`));
+      ora().warn(`${name}: ${path} (not found - optional)`);
     }
   });
 }
@@ -302,9 +304,11 @@ interface StrictCheckResult {
  */
 function displayStrictResults(results: StrictCheckResult[]): void {
   results.forEach(({ check, passed, message }) => {
-    const icon = passed ? chalk.green('✅') : chalk.red('❌');
-    const color = passed ? chalk.green : chalk.red;
-    console.log(`${icon} ${check}: ${color(message)}`);
+    if (passed) {
+      ora().succeed(`${check}: ${message}`);
+    } else {
+      ora().fail(`${check}: ${message}`);
+    }
   });
 }
 
@@ -368,11 +372,11 @@ function displayDependencyChecks(checks: DependencyCheck[]): void {
 
   checks.forEach(({ name, type, installed, required }) => {
     if (installed) {
-      console.log(chalk.green(`✅ ${name} (${type})`));
+      ora().succeed(`${name} (${type})`);
     } else if (required) {
-      console.log(chalk.red(`❌ ${name} (${type}) - not installed`));
+      ora().fail(`${name} (${type}) - not installed`);
     } else {
-      console.log(chalk.yellow(`⚠️  ${name} (${type}) - not installed`));
+      ora().warn(`${name} (${type}) - not installed`);
     }
   });
 }

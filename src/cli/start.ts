@@ -10,6 +10,7 @@ import { existsSync } from 'fs';
 import { join, dirname, resolve, basename } from 'path';
 
 import chalk from 'chalk';
+import ora from 'ora';
 
 import { validateConfig, mergeWithDefaults } from '../config/schema.js';
 import { loadConfigFromFile, findConfigFile } from '../config/loader.js';
@@ -67,17 +68,34 @@ export async function start(options: StartOptions): Promise<void> {
     chalk.level = 0;
   }
 
+  const configSpinner = ora(
+    `Loading configuration from ${configPath}...`
+  ).start();
+
   try {
-    // Load and validate configuration
-    console.log(chalk.dim(`Loading configuration from ${configPath}...`));
+    // Add timeout warning for first-time TypeScript config loading
+    let timeoutWarning: NodeJS.Timeout | undefined;
+    if (configPath.endsWith('.ts')) {
+      timeoutWarning = setTimeout(() => {
+        configSpinner.text = `Loading configuration (installing esbuild on first run)...`;
+      }, 3000);
+    }
 
     // Load config (supports both .json and .ts)
     const config = await loadConfigFromFile(fullPath);
+    
+    // Clear timeout if config loads quickly
+    if (timeoutWarning) {
+      clearTimeout(timeoutWarning);
+    }
+
+    configSpinner.text = 'Validating configuration...';
 
     // Validate configuration
     const validation = validateConfig(config);
 
     if (!validation.valid) {
+      configSpinner.fail('Configuration validation failed');
       console.error(chalk.red('\n❌ Configuration validation failed:\n'));
       validation.errors.forEach((error) => {
         console.error(chalk.red(`  • ${error.path}: ${error.message}`));
@@ -85,6 +103,8 @@ export async function start(options: StartOptions): Promise<void> {
       console.log(chalk.yellow('\nPlease fix these errors and try again.'));
       process.exit(1);
     }
+
+    configSpinner.succeed('Configuration loaded and validated');
 
     // Show warnings if any
     if (validation.warnings.length > 0) {
@@ -123,10 +143,14 @@ export async function start(options: StartOptions): Promise<void> {
 
     // If one-time generation, exit after completion
     if (options.oneTime) {
-      console.log(chalk.green('\n✅ Generation complete!'));
+      console.log(); // Empty line
+      ora().succeed('Generation complete!');
       await orchestrator.shutdown();
     }
   } catch (error) {
+    if (configSpinner.isSpinning) {
+      configSpinner.fail('Failed to start OATS');
+    }
     console.error(chalk.red('\n❌ Failed to start OATS:'));
 
     if (error instanceof ConfigError) {

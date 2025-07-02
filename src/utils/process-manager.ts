@@ -74,13 +74,18 @@ export class ProcessManager {
       child.kill(platformConfig.processTermSignal);
 
       // Force kill after timeout
-      setTimeout(() => {
+      const forceKillTimeout = setTimeout(() => {
         if (!child.killed) {
-          logger.warn(`Force killing process: PID ${child.pid}`);
+          // Silent during shutdown - no need to show force kill messages
           child.kill('SIGKILL');
           resolve();
         }
       }, 5000);
+      
+      // Clear timeout if process exits normally
+      child.on('exit', () => {
+        clearTimeout(forceKillTimeout);
+      });
     });
   }
 
@@ -88,7 +93,7 @@ export class ProcessManager {
    * Kill all active processes
    */
   async killAll(): Promise<void> {
-    logger.info('Killing all active processes...');
+    // Silent during shutdown
 
     const killPromises = Array.from(this.activeProcesses.values()).map(
       (child) => this.killProcess(child)
