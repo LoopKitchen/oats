@@ -30,21 +30,27 @@ class BackendService extends BaseService {
 
     const maxAttempts = 30;
     const checkInterval = 1000;
-    const spinner = ora(`Waiting for backend service on port ${this.config.port}...`).start();
+    const spinner = ora(
+      `Waiting for backend service on port ${this.config.port}...`
+    ).start();
 
     try {
       for (let i = 0; i < maxAttempts; i++) {
         const isReady = await PortManager.isPortInUse(this.config.port);
         if (isReady) {
           spinner.succeed(`Backend service ready on port ${this.config.port}`);
-          this.logger.debug(`Backend service ready on port ${this.config.port}`);
+          this.logger.debug(
+            `Backend service ready on port ${this.config.port}`
+          );
           return;
         }
         spinner.text = `Waiting for backend service on port ${this.config.port}... (${i + 1}/${maxAttempts})`;
         await new Promise((resolve) => setTimeout(resolve, checkInterval));
       }
 
-      spinner.fail(`Backend service did not start within ${maxAttempts} seconds`);
+      spinner.fail(
+        `Backend service did not start within ${maxAttempts} seconds`
+      );
       throw new Error(
         `Backend service failed to start on port ${this.config.port}`
       );
@@ -79,21 +85,27 @@ class FrontendService extends BaseService {
 
     const maxAttempts = 60; // Frontend can take longer
     const checkInterval = 1000;
-    const spinner = ora(`Waiting for frontend service on port ${this.config.port}...`).start();
+    const spinner = ora(
+      `Waiting for frontend service on port ${this.config.port}...`
+    ).start();
 
     try {
       for (let i = 0; i < maxAttempts; i++) {
         const isReady = await PortManager.isPortInUse(this.config.port);
         if (isReady) {
           spinner.succeed(`Frontend service ready on port ${this.config.port}`);
-          this.logger.debug(`Frontend service ready on port ${this.config.port}`);
+          this.logger.debug(
+            `Frontend service ready on port ${this.config.port}`
+          );
           return;
         }
         spinner.text = `Waiting for frontend service on port ${this.config.port}... (${i + 1}/${maxAttempts})`;
         await new Promise((resolve) => setTimeout(resolve, checkInterval));
       }
 
-      spinner.fail(`Frontend service did not start within ${maxAttempts} seconds`);
+      spinner.fail(
+        `Frontend service did not start within ${maxAttempts} seconds`
+      );
       throw new Error(
         `Frontend service failed to start on port ${this.config.port}`
       );
@@ -269,7 +281,7 @@ export class DevSyncOrchestrator extends EventEmitter {
       services: this.services,
       processManager: this.processManager,
       configWatcher: this.configWatcher,
-      unlinkPackages: this.unlinkPackages.bind(this)
+      unlinkPackages: this.unlinkPackages.bind(this),
     });
   }
 
@@ -277,17 +289,20 @@ export class DevSyncOrchestrator extends EventEmitter {
    * Stop all services without exiting the process
    */
   private async stop(keepConfigWatcher = false): Promise<void> {
-    await this.shutdownManager.shutdown({
-      syncEngine: this.syncEngine,
-      services: this.services,
-      processManager: this.processManager,
-      configWatcher: this.configWatcher,
-      unlinkPackages: this.unlinkPackages.bind(this)
-    }, {
-      keepConfigWatcher,
-      exitProcess: false
-    });
-    
+    await this.shutdownManager.shutdown(
+      {
+        syncEngine: this.syncEngine,
+        services: this.services,
+        processManager: this.processManager,
+        configWatcher: this.configWatcher,
+        unlinkPackages: this.unlinkPackages.bind(this),
+      },
+      {
+        keepConfigWatcher,
+        exitProcess: false,
+      }
+    );
+
     // Clear service references after shutdown
     this.syncEngine = undefined;
     if (!keepConfigWatcher) {

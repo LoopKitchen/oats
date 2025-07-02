@@ -81,7 +81,7 @@ export class ProcessManager {
           resolve();
         }
       }, 5000);
-      
+
       // Clear timeout if process exits normally
       child.on('exit', () => {
         clearTimeout(forceKillTimeout);

@@ -83,7 +83,7 @@ export async function start(options: StartOptions): Promise<void> {
 
     // Load config (supports both .json and .ts)
     const config = await loadConfigFromFile(fullPath);
-    
+
     // Clear timeout if config loads quickly
     if (timeoutWarning) {
       clearTimeout(timeoutWarning);

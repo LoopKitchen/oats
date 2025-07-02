@@ -23,8 +23,14 @@ async function hasEsbuild(): Promise<boolean> {
     return true;
   } catch {
     // If not available locally, npx will download it
-    console.log(chalk.dim('\n📦 First-time setup: downloading esbuild for TypeScript config support...'));
-    console.log(chalk.dim('   This may take a minute but only happens once.\n'));
+    console.log(
+      chalk.dim(
+        '\n📦 First-time setup: downloading esbuild for TypeScript config support...'
+      )
+    );
+    console.log(
+      chalk.dim('   This may take a minute but only happens once.\n')
+    );
     return false;
   }
 }

@@ -163,7 +163,7 @@ export abstract class BaseService extends EventEmitter {
     this.process.stdout?.on('data', (data) => {
       const output = data.toString().trim();
       if (!output) return;
-      
+
       this.handleOutput(output);
 
       // Show service output based on log level and showServiceOutput setting
@@ -174,7 +174,11 @@ export abstract class BaseService extends EventEmitter {
       // Only show service output in debug mode or if explicitly enabled in info mode
       // Don't show output during shutdown
       const shutdownManager = ShutdownManager.getInstance();
-      if (showServiceOutput && (logLevel === 'debug' || logLevel === 'info') && !shutdownManager.isShutdownInProgress()) {
+      if (
+        showServiceOutput &&
+        (logLevel === 'debug' || logLevel === 'info') &&
+        !shutdownManager.isShutdownInProgress()
+      ) {
         console.log(chalk.gray(`[${this.config.name}] ${output}`));
       }
     });
@@ -197,7 +201,7 @@ export abstract class BaseService extends EventEmitter {
       if (this.state === ServiceState.STOPPING) {
         return;
       }
-      
+
       if (this.state === ServiceState.RUNNING) {
         this.error = new Error(`Process exited unexpectedly with code ${code}`);
         this.setState(ServiceState.ERROR);

@@ -121,7 +121,7 @@ export async function init(options: InitOptions): Promise<void> {
     writeSpinner.succeed('Configuration created!');
 
     ora().succeed('OATSJS initialized successfully!');
-    
+
     console.log(
       `\n${chalk.bold('Configuration saved to:')}`,
       chalk.cyan(configPath)

@@ -679,7 +679,7 @@ export class DevSyncEngine extends EventEmitter {
       // Write back the updated package.json
       writeFileSync(
         packageJsonPath,
-        JSON.stringify(packageJson, null, 2) + '\n'
+        `${JSON.stringify(packageJson, null, 2)}\n`
       );
 
       this.logger.debug(
@@ -748,7 +748,6 @@ export class DevSyncEngine extends EventEmitter {
       throw error;
     }
   }
-
 
   /**
    * Run a shell command
