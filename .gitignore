@@ -90,4 +90,7 @@ CLAUDE.md
 claude-*.md
 *claude*
 
+# Documentation (keep local only)
+/docs
+
 # git rm -r --cached .

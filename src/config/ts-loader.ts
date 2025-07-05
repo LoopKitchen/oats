@@ -7,32 +7,20 @@
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import chalk from 'chalk';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import type { OatsConfig } from '../types/config.types.js';
 import { ConfigError } from '../errors/index.js';
 
 const execAsync = promisify(exec);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Check if esbuild is available
+ * Check if esbuild is available (now always returns true since it's a dependency)
  */
 async function hasEsbuild(): Promise<boolean> {
-  try {
-    // Check if esbuild is available locally first
-    await execAsync('node_modules/.bin/esbuild --version');
-    return true;
-  } catch {
-    // If not available locally, npx will download it
-    console.log(
-      chalk.dim(
-        '\n📦 First-time setup: downloading esbuild for TypeScript config support...'
-      )
-    );
-    console.log(
-      chalk.dim('   This may take a minute but only happens once.\n')
-    );
-    return false;
-  }
+  // esbuild is now a direct dependency of OATS, so it's always available
+  return true;
 }
 
 /**
@@ -52,9 +40,10 @@ export async function loadTypeScriptConfig(
 
   try {
     // Transpile TypeScript to JavaScript using esbuild
-    // Using execAsync to avoid blocking the event loop
+    // Use the esbuild that's bundled with OATS for consistency
+    const esbuildPath = join(__dirname, '../../node_modules/.bin/esbuild');
     await execAsync(
-      `npx esbuild ${configPath} --bundle --platform=node --format=cjs --external:@tryloop/oats --outfile=${tempFile}`
+      `${esbuildPath} ${configPath} --bundle --platform=node --format=cjs --external:@tryloop/oats --outfile=${tempFile}`
     );
 
     // Load the transpiled JavaScript
@@ -65,7 +54,22 @@ export async function loadTypeScriptConfig(
       unlinkSync(tempFile);
     }
 
-    return (config.default || config) as OatsConfig;
+    // Handle the config object - esbuild wraps ESM default exports in a default property
+    // when converting to CJS, but we need to check if it's a double-wrapped scenario
+    if (
+      config.default &&
+      typeof config.default === 'object' &&
+      'default' in config.default
+    ) {
+      // Double wrapped - take the inner default
+      return config.default.default as OatsConfig;
+    } else if (config.default !== undefined) {
+      // Single wrapped - take the default
+      return config.default as OatsConfig;
+    } else {
+      // Not wrapped - return as is
+      return config as OatsConfig;
+    }
   } catch (error) {
     // Clean up temp file on error
     if (existsSync(tempFile)) {
