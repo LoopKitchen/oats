@@ -90,11 +90,11 @@ class FrontendService extends BaseService {
       this.config.path,
       this.runtimeConfig
     );
-    
+
     // Merge with existing env config
     this.config.env = {
       ...this.config.env,
-      ...oatsEnvVars
+      ...oatsEnvVars,
     };
 
     // Call parent start method

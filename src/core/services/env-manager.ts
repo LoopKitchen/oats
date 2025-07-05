@@ -1,6 +1,6 @@
 /**
  * Environment Variable Manager for OATS
- * 
+ *
  * Handles framework detection and environment variable injection
  * for seamless backend URL configuration across different frontend frameworks
  */
@@ -18,11 +18,15 @@ export interface FrameworkEnvConfig {
 
 export class EnvManager {
   private logger: Logger;
-  
+
   // Framework configurations with their environment variable prefixes
   private static readonly FRAMEWORK_CONFIGS: FrameworkEnvConfig[] = [
     { framework: 'vite', envPrefix: 'VITE_', description: 'Vite' },
-    { framework: 'create-react-app', envPrefix: 'REACT_APP_', description: 'Create React App' },
+    {
+      framework: 'create-react-app',
+      envPrefix: 'REACT_APP_',
+      description: 'Create React App',
+    },
     { framework: 'vue-cli', envPrefix: 'VUE_APP_', description: 'Vue CLI' },
     { framework: 'next', envPrefix: 'NEXT_PUBLIC_', description: 'Next.js' },
     { framework: 'nuxt', envPrefix: 'NUXT_PUBLIC_', description: 'Nuxt' },
@@ -46,9 +50,9 @@ export class EnvManager {
       }
 
       const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-      const deps = { 
-        ...packageJson.dependencies, 
-        ...packageJson.devDependencies 
+      const deps = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
       };
 
       // Check for framework indicators
@@ -60,17 +64,25 @@ export class EnvManager {
       if (deps['@vitejs/plugin-react'] || deps['vite']) return 'vite';
       if (deps['react-scripts']) return 'create-react-app';
       if (deps['@vue/cli-service']) return 'vue-cli';
-      
+
       // Check scripts for additional hints
       const scripts = packageJson.scripts || {};
-      if (scripts.dev?.includes('vite') || scripts.start?.includes('vite')) return 'vite';
-      if (scripts.start?.includes('react-scripts')) return 'create-react-app';
-      if (scripts.serve?.includes('vue-cli-service')) return 'vue-cli';
-      
+      if (scripts.dev?.includes('vite') || scripts.start?.includes('vite'))
+        return 'vite';
+      if (
+        scripts.start?.includes('react-scripts') ||
+        scripts.dev?.includes('react-scripts')
+      )
+        return 'create-react-app';
+      if (
+        scripts.serve?.includes('vue-cli-service') ||
+        scripts.dev?.includes('vue-cli-service')
+      )
+        return 'vue-cli';
     } catch (error) {
       this.logger.debug(`Could not detect framework: ${error}`);
     }
-    
+
     return 'unknown';
   }
 
@@ -78,7 +90,9 @@ export class EnvManager {
    * Get the appropriate env prefix for a framework
    */
   private getEnvPrefix(framework: string): string {
-    const config = EnvManager.FRAMEWORK_CONFIGS.find(f => f.framework === framework);
+    const config = EnvManager.FRAMEWORK_CONFIGS.find(
+      (f) => f.framework === framework
+    );
     return config?.envPrefix || '';
   }
 
@@ -86,19 +100,19 @@ export class EnvManager {
    * Generate OATS environment variables for frontend service
    */
   generateFrontendEnvVars(
-    frontendPath: string, 
+    frontendPath: string,
     runtimeConfig: RuntimeConfig
   ): Record<string, string> {
     // Construct backend URL from config
     const backendConfig = runtimeConfig.services.backend;
-    const backendUrl = backendConfig.port 
+    const backendUrl = backendConfig.port
       ? `http://localhost:${backendConfig.port}`
       : 'http://localhost:8000';
 
     // Detect framework
     const framework = this.detectFramework(frontendPath);
     const envPrefix = this.getEnvPrefix(framework);
-    
+
     // Build environment variables
     const envVars: Record<string, string> = {
       // Generic OATS variables (always included)
@@ -111,7 +125,7 @@ export class EnvManager {
     if (envPrefix) {
       envVars[`${envPrefix}OATS_BACKEND_BASE_URL`] = backendUrl;
       envVars[`${envPrefix}OATS_MODE`] = 'true';
-      
+
       // Add common API URL patterns for convenience
       envVars[`${envPrefix}API_URL`] = backendUrl;
       envVars[`${envPrefix}API_BASE_URL`] = backendUrl;
@@ -138,7 +152,9 @@ export class EnvManager {
    * Get a user-friendly framework description
    */
   getFrameworkDescription(framework: string): string {
-    const config = EnvManager.FRAMEWORK_CONFIGS.find(f => f.framework === framework);
+    const config = EnvManager.FRAMEWORK_CONFIGS.find(
+      (f) => f.framework === framework
+    );
     return config?.description || 'Unknown Framework';
   }
 
@@ -154,7 +170,7 @@ export class EnvManager {
     switch (serviceType) {
       case 'frontend':
         return this.generateFrontendEnvVars(servicePath, runtimeConfig);
-      
+
       case 'backend':
         // Backend services might need database URLs, service URLs, etc.
         return {
@@ -162,7 +178,7 @@ export class EnvManager {
           OATS_MODE: 'true',
           // Add more backend-specific env vars as needed
         };
-        
+
       case 'worker':
         // Worker services might need queue URLs, backend URLs, etc.
         return {
@@ -171,7 +187,7 @@ export class EnvManager {
           BACKEND_URL: `http://localhost:${runtimeConfig.services.backend?.port || 8000}`,
           // Add more worker-specific env vars as needed
         };
-        
+
       default:
         return {};
     }
