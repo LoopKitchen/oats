@@ -141,6 +141,7 @@ All major frameworks: [React](https://react.dev/), [Vue](https://vuejs.org/), [A
 - **Config hot-reload** - changes restart services automatically
 - **IntelliSense support** - JSON schema for autocompletion
 - **Multiple config formats** - JSON, JS, or TypeScript (with built-in transpilation)
+- **Automatic backend URL injection** - Frontend uses local API in dev, production in prod
 
 ### 🚀 Performance
 - **45% faster sync** than manual process
@@ -256,6 +257,26 @@ OATS automatically handles port conflicts. To disable:
 1. Check package is linked: `npm ls @myorg/api-client`
 2. For Vite: Exclude from optimization in `vite.config.ts`
 3. Ensure `packageName` matches your client's `package.json`
+
+### Automatic Backend URL Injection
+
+OATS automatically injects your backend URL into your frontend environment:
+
+```typescript
+// Your frontend code
+const API_URL = import.meta.env.VITE_OATS_BACKEND_BASE_URL || 'https://api.production.com'
+```
+
+**How it works:**
+1. OATS detects your frontend framework (Vite, CRA, Next.js, etc.)
+2. Injects the backend URL with the correct prefix:
+   - Vite: `VITE_OATS_BACKEND_BASE_URL`
+   - Create React App: `REACT_APP_OATS_BACKEND_BASE_URL`
+   - Next.js: `NEXT_PUBLIC_OATS_BACKEND_BASE_URL`
+   - Vue CLI: `VUE_APP_OATS_BACKEND_BASE_URL`
+3. Your app uses local backend when running with OATS, production otherwise
+
+**No configuration needed** - it just works!
 
 ### TypeScript config issues
 OATS fully supports TypeScript configs (`.ts` files) with built-in transpilation:

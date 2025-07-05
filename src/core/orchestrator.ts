@@ -20,6 +20,7 @@ import { ShutdownManager } from '../utils/shutdown-manager.js';
 
 import { DevSyncEngine } from './dev-sync-optimized.js';
 import { BaseService, ServiceState } from './services/base-service.js';
+import { envManager } from './services/env-manager.js';
 
 import type { RuntimeConfig } from '../types/config.types.js';
 
@@ -80,6 +81,26 @@ class ClientService extends BaseService {
 }
 
 class FrontendService extends BaseService {
+  /**
+   * Override start to inject OATS environment variables
+   */
+  async start(): Promise<void> {
+    // Generate and merge OATS env vars
+    const oatsEnvVars = envManager.generateFrontendEnvVars(
+      this.config.path,
+      this.runtimeConfig
+    );
+    
+    // Merge with existing env config
+    this.config.env = {
+      ...this.config.env,
+      ...oatsEnvVars
+    };
+
+    // Call parent start method
+    await super.start();
+  }
+
   protected async waitForReady(): Promise<void> {
     if (!this.config.port) return;
 
