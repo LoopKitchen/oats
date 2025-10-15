@@ -18,6 +18,7 @@ import ora from 'ora';
 import { ApiSpecError, GeneratorError } from '../errors/index.js';
 import { PlatformUtils } from '../utils/platform.js';
 import { Logger } from '../utils/logger.js';
+import { ProcessManager } from '../utils/process-manager.js';
 
 import { SwaggerChangeDetector } from './swagger-diff.js';
 
@@ -51,12 +52,15 @@ export class DevSyncEngine extends EventEmitter {
   private pollingInterval?: NodeJS.Timeout;
   private lastGeneratedSpecHash?: string;
   private logger: Logger;
+  private processManager: ProcessManager;
 
-  constructor(config: RuntimeConfig) {
+  constructor(config: RuntimeConfig, processManager?: ProcessManager) {
     super();
     this.config = config;
     this.changeDetector = new SwaggerChangeDetector();
     this.logger = new Logger('DevSyncEngine');
+    this.processManager = processManager ?? new ProcessManager();
+    this.primeChangeDetector();
 
     // Setup debounced sync function with platform-specific timing
     const debounceMs =
@@ -753,17 +757,78 @@ export class DevSyncEngine extends EventEmitter {
    * Run a shell command
    */
   private async runCommand(command: string, cwd: string): Promise<void> {
-    const { execa } = await import('execa');
+    const stdio = this.config.log?.quiet ? 'pipe' : 'inherit';
+    const child = this.processManager.startProcess(command, [], {
+      cwd,
+      shell: true,
+      stdio,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      child.once('exit', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Command failed: ${command} - exited with code ${code}`));
+        }
+      });
+
+      child.once('error', (error) => {
+        reject(new Error(`Command failed: ${command} - ${error}`));
+      });
+    });
+  }
+
+  /**
+   * Prime the change detector from previously generated artifacts
+   */
+  private primeChangeDetector(): void {
+    const isRuntimeSpec =
+      this.config.services.backend.apiSpec.path.startsWith('runtime:') ||
+      this.config.services.backend.apiSpec.path.startsWith('/');
+
+    if (isRuntimeSpec) {
+      return;
+    }
+
+    const specPath = join(
+      this.config.resolvedPaths.backend,
+      this.config.services.backend.apiSpec.path
+    );
+    const specHashPath = join(
+      this.config.resolvedPaths.client,
+      '.openapi-hash'
+    );
+
+    if (!existsSync(specPath) || !existsSync(specHashPath)) {
+      return;
+    }
 
     try {
-      const stdio = this.config.log?.quiet ? 'pipe' : 'inherit';
-      await execa(command, {
-        cwd,
-        shell: true,
-        stdio,
-      });
+      const persistedHash = readFileSync(specHashPath, 'utf-8').trim();
+      if (!persistedHash) {
+        return;
+      }
+
+      const currentSpec = JSON.parse(readFileSync(specPath, 'utf-8'));
+      const specHash = this.changeDetector.getSpecHash(currentSpec);
+
+      if (specHash === persistedHash) {
+        this.changeDetector.primeWithSpec(currentSpec);
+        this.lastGeneratedSpecHash = specHash;
+        this.logger.debug(
+          chalk.dim(
+            'Reusing existing client artifacts; initial sync already up-to-date'
+          )
+        );
+      }
     } catch (error) {
-      throw new Error(`Command failed: ${command} - ${error}`);
+      this.logger.debug(
+        chalk.dim(
+          `Unable to reuse previous client artifacts: ${String(error)}`
+        )
+      );
+      this.changeDetector.reset();
     }
   }
 

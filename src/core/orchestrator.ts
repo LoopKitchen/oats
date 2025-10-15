@@ -6,8 +6,9 @@
  */
 
 import { EventEmitter } from 'events';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { createHash } from 'crypto';
 import { watch } from 'chokidar';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -146,6 +147,14 @@ class FrontendService extends BaseService {
   }
 }
 
+interface LinkedPackageInfo {
+  frontendPath: string;
+  frontendPackageManager: string;
+  clientPath: string;
+  clientPackageManager: string;
+  globalLinked: boolean;
+}
+
 export class DevSyncOrchestrator extends EventEmitter {
   private config: RuntimeConfig;
   private logger: Logger;
@@ -153,7 +162,7 @@ export class DevSyncOrchestrator extends EventEmitter {
   private shutdownManager: ShutdownManager;
   private services: Map<string, BaseService> = new Map();
   private syncEngine?: DevSyncEngine;
-  private linkedPackages: Set<string> = new Set();
+  private linkedPackages: Map<string, LinkedPackageInfo> = new Map();
   private configWatcher?: any;
 
   constructor(config: RuntimeConfig) {
@@ -268,7 +277,7 @@ export class DevSyncOrchestrator extends EventEmitter {
 
       // Start sync engine
       DebugManager.section('Starting Sync Engine');
-      this.syncEngine = new DevSyncEngine(this.config);
+      this.syncEngine = new DevSyncEngine(this.config, this.processManager);
       this.setupSyncHandlers();
       await this.syncEngine.start();
 
@@ -341,18 +350,99 @@ export class DevSyncOrchestrator extends EventEmitter {
     const clientName = this.config.services.client.packageName;
     const frontendPath = this.config.resolvedPaths.frontend!;
 
-    const pm = this.detectPackageManager(frontendPath);
+    const frontendPackageManager = this.detectPackageManager(frontendPath);
+    const clientPackageManager = this.detectPackageManager(clientPath);
+    const fingerprint = this.getClientPackageFingerprint(clientPath);
+    const cachePath = join(clientPath, '.oats-link-cache.json');
+    let shouldCreateGlobalLink = true;
+    let globalLinkedThisSession = false;
+
+    if (fingerprint) {
+      if (existsSync(cachePath)) {
+        try {
+          const cached = JSON.parse(readFileSync(cachePath, 'utf-8')) as {
+            hash?: string;
+            packageManager?: string;
+            frontendPath?: string;
+          };
+
+          if (
+            cached.hash === fingerprint &&
+            cached.packageManager === frontendPackageManager &&
+            cached.frontendPath === frontendPath
+          ) {
+            shouldCreateGlobalLink = false;
+          }
+        } catch (error) {
+          this.logger.debug(
+            'Failed to read link cache, falling back to fresh link:',
+            error
+          );
+        }
+      }
+    }
+
     const spinner = ora(`Linking ${clientName} to frontend...`).start();
 
     try {
-      // Link in client directory
-      spinner.text = `Creating ${pm} link for ${clientName}...`;
-      await this.runCommand(`${pm} link`, clientPath);
-      this.linkedPackages.add(clientName);
+      if (shouldCreateGlobalLink) {
+        spinner.text = `Creating ${clientPackageManager} link for ${clientName}...`;
+        await this.runCommand(`${clientPackageManager} link`, clientPath);
+        globalLinkedThisSession = true;
+
+        if (fingerprint) {
+          this.writeLinkCache(cachePath, {
+            hash: fingerprint,
+            packageManager: frontendPackageManager,
+            frontendPath,
+          });
+        }
+      } else {
+        spinner.text = `Using cached ${frontendPackageManager} link for ${clientName}...`;
+        globalLinkedThisSession = true;
+      }
 
       // Link to frontend
       spinner.text = `Linking ${clientName} to frontend project...`;
-      await this.runCommand(`${pm} link ${clientName}`, frontendPath);
+      try {
+        await this.runCommand(
+          `${frontendPackageManager} link ${clientName}`,
+          frontendPath
+        );
+      } catch (error) {
+        if (!shouldCreateGlobalLink) {
+          this.logger.warn(
+            `Cached link failed; refreshing global link for ${clientName}`
+          );
+          spinner.text = `Refreshing ${clientPackageManager} link for ${clientName}...`;
+          await this.runCommand(`${clientPackageManager} link`, clientPath);
+          globalLinkedThisSession = true;
+
+          if (fingerprint) {
+            this.writeLinkCache(cachePath, {
+              hash: fingerprint,
+              packageManager: frontendPackageManager,
+              frontendPath,
+            });
+          }
+
+          spinner.text = `Linking ${clientName} to frontend project...`;
+          await this.runCommand(
+            `${frontendPackageManager} link ${clientName}`,
+            frontendPath
+          );
+        } else {
+          throw error;
+        }
+      }
+
+      this.linkedPackages.set(clientName, {
+        frontendPath,
+        frontendPackageManager,
+        clientPath,
+        clientPackageManager,
+        globalLinked: globalLinkedThisSession,
+      });
 
       spinner.succeed(`Linked ${clientName} to frontend`);
     } catch (error) {
@@ -365,16 +455,33 @@ export class DevSyncOrchestrator extends EventEmitter {
    * Unlink packages on shutdown
    */
   private async unlinkPackages(): Promise<void> {
-    for (const packageName of this.linkedPackages) {
+    for (const [packageName, info] of this.linkedPackages) {
       try {
-        if (this.config.resolvedPaths.frontend) {
-          const pm = this.detectPackageManager(
-            this.config.resolvedPaths.frontend
-          );
+        if (info.frontendPath) {
           await this.runCommand(
-            `${pm} unlink ${packageName}`,
-            this.config.resolvedPaths.frontend
+            `${info.frontendPackageManager} unlink ${packageName}`,
+            info.frontendPath
           );
+          console.log(
+            chalk.dim(
+              `🔗 Removed ${packageName} link from frontend (${info.frontendPackageManager})`
+            )
+          );
+        }
+
+        if (info.globalLinked) {
+          const unlinkCommand = this.getGlobalUnlinkCommand(
+            info.clientPackageManager,
+            packageName
+          );
+          if (unlinkCommand) {
+            await this.runCommand(unlinkCommand, info.clientPath);
+            console.log(
+              chalk.dim(
+                `🔗 Removed global link for ${packageName} (${info.clientPackageManager})`
+              )
+            );
+          }
         }
       } catch (err) {
         // Ignore unlink errors
@@ -390,6 +497,85 @@ export class DevSyncOrchestrator extends EventEmitter {
     if (existsSync(join(projectPath, 'yarn.lock'))) return 'yarn';
     if (existsSync(join(projectPath, 'pnpm-lock.yaml'))) return 'pnpm';
     return 'npm';
+  }
+
+  /**
+   * Calculate a fingerprint for the client package to detect changes
+   */
+  private getClientPackageFingerprint(clientPath: string): string | null {
+    try {
+      const hash = createHash('sha256');
+      const packageJsonPath = join(clientPath, 'package.json');
+
+      if (!existsSync(packageJsonPath)) {
+        return null;
+      }
+
+      hash.update(readFileSync(packageJsonPath, 'utf-8'));
+
+      const lockFiles = ['yarn.lock', 'package-lock.json', 'pnpm-lock.yaml'];
+      for (const lockFile of lockFiles) {
+        const lockPath = join(clientPath, lockFile);
+        if (existsSync(lockPath)) {
+          hash.update(readFileSync(lockPath, 'utf-8'));
+        }
+      }
+
+      return hash.digest('hex');
+    } catch (error) {
+      this.logger.debug(
+        `Failed to fingerprint client package at ${clientPath}:`,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Persist link cache metadata to speed up subsequent startups
+   */
+  private writeLinkCache(
+    cachePath: string,
+    data: {
+      hash: string;
+      packageManager: string;
+      frontendPath: string;
+    }
+  ): void {
+    try {
+      writeFileSync(
+        cachePath,
+        `${JSON.stringify(
+          {
+            ...data,
+            updatedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        )}\n`
+      );
+    } catch (error) {
+      this.logger.debug('Failed to write link cache file:', error);
+    }
+  }
+
+  /**
+   * Determine the appropriate command to remove global links
+   */
+  private getGlobalUnlinkCommand(
+    packageManager: string,
+    packageName: string
+  ): string | null {
+    switch (packageManager) {
+      case 'yarn':
+        return 'yarn unlink';
+      case 'npm':
+        return 'npm unlink';
+      case 'pnpm':
+        return `pnpm unlink --global ${packageName}`;
+      default:
+        return null;
+    }
   }
 
   /**

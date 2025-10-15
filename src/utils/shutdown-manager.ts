@@ -70,20 +70,30 @@ export class ShutdownManager {
     console.log(chalk.yellow.bold('\n🛑 Shutting down services...\n'));
 
     try {
+      const shutdownTasks: Promise<void>[] = [];
+
       // Stop sync engine
       if (services.syncEngine) {
-        await services.syncEngine.stop();
+        shutdownTasks.push(
+          services.syncEngine.stop().catch((err) => {
+            this.logger.error('Failed to stop sync engine:', err);
+          })
+        );
       }
 
       // Stop all services
-      for (const service of services.services.values()) {
-        try {
-          await service.stop();
-        } catch (err) {
-          const serviceName = service.getInfo().name;
-          this.logger.error(`Failed to stop ${serviceName}:`, err);
-        }
-      }
+      shutdownTasks.push(
+        ...Array.from(services.services.values()).map(async (service) => {
+          try {
+            await service.stop();
+          } catch (err) {
+            const serviceName = service.getInfo().name;
+            this.logger.error(`Failed to stop ${serviceName}:`, err);
+          }
+        })
+      );
+
+      await Promise.all(shutdownTasks);
 
       // Kill any remaining processes
       await services.processManager.killAll();

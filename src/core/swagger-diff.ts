@@ -71,6 +71,23 @@ export class SwaggerChangeDetector {
   }
 
   /**
+   * Manually prime detector state with a known spec snapshot
+   */
+  primeWithSpec(spec: any): void {
+    const hash = this.calculateSpecHash(spec);
+    this.lastState = hash;
+    this.lastSpec = spec;
+    this.currentState = hash;
+  }
+
+  /**
+   * Expose hash calculation for caching strategies
+   */
+  getSpecHash(spec: any): string {
+    return this.calculateSpecHash(spec);
+  }
+
+  /**
    * Get detailed change analysis
    */
   analyzeChanges(previousSpec: any, currentSpec: any): ChangeDetectionResult {
