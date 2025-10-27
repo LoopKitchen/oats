@@ -84,7 +84,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload OWASP results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         if: always()
         with:
           name: owasp-results
